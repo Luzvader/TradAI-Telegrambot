@@ -3,26 +3,7 @@ import * as React from "react";
 import { CssBaseline, ThemeProvider, createTheme } from "@mui/material";
 import NavBar from "../components/NavBar";
 
-// Global styles for consistent widget sizing
-const globalStyles = `
-  html, body, #__next {
-    height: 100%;
-    margin: 0;
-    padding: 0;
-    overflow-x: hidden;
-  }
-  
-  .MuiDataGrid-root {
-    min-height: 300px;
-  }
-  
-  .MuiPaper-root {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-`;
+
 
 const theme = createTheme({
   palette: {
@@ -49,6 +30,27 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Global styles for consistent widget sizing
+  const globalStyles = `
+    html, body, #__next {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+    }
+    
+    .MuiDataGrid-root {
+      min-height: 300px;
+    }
+    
+    .MuiPaper-root {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+  `;
+
   return (
     <html lang="en">
       <head>

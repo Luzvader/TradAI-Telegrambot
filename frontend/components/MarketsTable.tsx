@@ -3,7 +3,8 @@ import { DataGrid, GridColDef, GridRowsProp } from "@mui/x-data-grid";
 import { Sparklines, SparklinesLine } from "react-sparklines";
 import useSWR from "swr";
 import { fetcher } from "../utils/fetcher";
-import { Box } from "@mui/material";
+import { Box, Typography } from "@mui/material";
+import React from "react";
 
 interface MarketResponse {
   symbols: string[];
