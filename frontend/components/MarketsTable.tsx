@@ -30,7 +30,7 @@ export default function MarketsTable({ symbols }: { symbols: string[] }) {
 
   return (
     <div style={{ height: 400 }}>
-      <DataGrid rows={rows} columns={cols} pageSizeOptions={[5, 10]} />
+      <DataGrid rows={rows} columns={cols} />
     </div>
   );
 }
