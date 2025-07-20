@@ -44,6 +44,7 @@ from .services.strategy_service import (
     save_strategy as svc_save_strategy,
     list_orders as svc_list_orders,
 )
+from .services.pnl_service import calculate_pnl as svc_calculate_pnl
 from .bot_engine import BotEngine
 from .strategy import save_strategy as save_rule_strategy
 
@@ -210,5 +211,12 @@ def stop_bot():
 @app.get("/orders")
 def get_orders():
     return svc_list_orders()
+
+
+@app.get("/pnl")
+def get_pnl():
+    """Return simple profit/loss based on logged orders."""
+    pnl = svc_calculate_pnl()
+    return {"pnl": pnl}
 
 __all__ = ["app", "DEFAULT_SYMBOLS", "TradingViewClient"]
