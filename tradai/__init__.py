@@ -2,13 +2,13 @@
 
 # Exponemos solo el cliente de TradingView a nivel de paquete
 from .tradingview import TradingViewClient
-from .monitor import monitor_prices
+from .services.market_service import fetch_with_indicators
 from .strategies import Strategy, save_strategy, load_strategies
 from .engine import execute
 
 __all__ = [
     "TradingViewClient",
-    "monitor_prices",
+    "fetch_with_indicators",
     "Strategy",
     "save_strategy",
     "load_strategies",
