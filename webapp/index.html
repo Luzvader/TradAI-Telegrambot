@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="es">
+ Trading-bot-dev
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradAI Panel</title>
+<style>
+body { margin:0; font-family: Arial, sans-serif; background:linear-gradient(#1e1e1e,#121212); color:#eee; }
+.container { display:flex; height:100vh; }
+.sidebar { width:200px; background:#2b2b2b; padding:1rem; }
+.sidebar h2 { margin-top:0; }
+.sidebar ul { list-style:none; padding:0; }
+.sidebar li { cursor:pointer; margin:0.5rem 0; }
+.sidebar li.active { font-weight:bold; }
+.sidebar li:hover { text-decoration:underline; }
+.content { flex:1; padding:1rem; overflow-y:auto; background:#1b1b1b; }
+table { border-collapse:collapse; width:100%; margin-top:0.5rem; }
+th,td { border:1px solid #555; padding:0.3rem; text-align:center; }
+button { background:#4caf50; border:none; padding:0.4rem 0.8rem; color:#fff; cursor:pointer; margin-left:0.2rem; }
+button:hover { background:#45a049; }
+input,select { margin:0.2rem; padding:0.2rem; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://s3.tradingview.com/tv.js"></script>
+<script type="text/babel">
+const {useState, useEffect} = React;
+
+function Menu({current, onChange}) {
+  const items = [
+    ['dashboard','Monitor'],
+    ['wallet','Cartera'],
+    ['strategies','Estrategias'],
+    ['llm','LLM'],
+    ['orders','Órdenes'],
+    ['options','Opciones'],
+    ['user','Usuario']
+  ];
+  return (
+    <aside className="sidebar">
+      <h2>TradAI</h2>
+      <ul>
+      {items.map(([id,label]) => (
+        <li key={id} className={current===id? 'active':''} onClick={()=>onChange(id)}>{label}</li>
+      ))}
+      </ul>
+    </aside>
+  );
+}
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TradAI Web</title>
+    <style>
+      body {
+        --bg-color: #1e1e1e;
+        --text-color: #eee;
+        --table-header-bg: #333;
+        --table-border: #444;
+        --hover-bg: #2a2a2a;
+        background: var(--bg-color);
+        color: var(--text-color);
+        font-family: Arial, sans-serif;
+        margin: 2rem;
+        transition: background-color 0.3s, color 0.3s;
+      }
+      input {
+        padding: 0.4rem 0.6rem;
+        margin-right: 0.5rem;
+      }
+      button {
+        padding: 0.5rem 0.8rem;
+        margin-right: 0.5rem;
+      }
+      table {
+        border-collapse: collapse;
+        margin-top: 1rem;
+        width: 100%;
+      }
+      th,
+      td {
+        border: 1px solid var(--table-border);
+        padding: 0.5rem;
+        text-align: center;
+      }
+      tbody tr {
+        transition: background-color 0.3s ease;
+      }
+      th {
+        background: var(--table-header-bg);
+        color: var(--text-color);
+        
+      }
+      .countdown {
+        margin-top: 0.5rem;
+        font-size: 0.9rem;
+        color: #555;
+      }
+      .message {
+        color: red;
+        margin-top: 0.5rem;
+      }
+          /* Light theme overrides */
+      .light {
+        --bg-color: #ffffff;
+        --text-color: #222;
+        --table-header-bg: #eaeaea;
+        --table-border: #ccc;
+        --hover-bg: #f5f5f5;
+      }
+
+      /* Hover effect */
+      tbody td:hover {
+        background: var(--hover-bg);
+      }
+          /* chart container */
+      #chartContainer {
+        border: 1px solid var(--table-border);
+      }
+
+      #options {
+        border: 1px solid var(--table-border);
+        padding: 0.5rem;
+        margin-top: 1rem;
+        display: none;
+        background: var(--hover-bg);
+      }
+
+      #options label {
+        margin-right: 0.3rem;
+      }
+
+      #options input {
+        margin-right: 1rem;
+      }
+
+    </style>
+  </head>
+  <body>
+    <h1>TradAI Web</h1>
+ main
+
+function Dashboard() {
+  const [symbols, setSymbols] = useState('BTC,ETH');
+  const [timeframe, setTimeframe] = useState('5m');
+  const [data,setData] = useState([]);
+  async function query() {
+    const res = await fetch(`/monitor?symbols=${symbols}&timeframe=${timeframe}`);
+    if(res.ok) {
+      const json = await res.json();
+      const rows = Object.entries(json.data).map(([t,v])=>{
+        const sym = t.replace('BINANCE:','').replace('USDT','');
+        return {symbol:sym, price:v[3], ema20:v[4], ema50:v[5], rsi:v[6]};
+      });
+      setData(rows);
+    }
+  }
+  useEffect(()=>{query();},[]);
+  useEffect(()=>{
+    if(data.length>0){
+      new TradingView.widget({
+        symbol:`BINANCE:${data[0].symbol}USDT`,
+        interval:timeframe,
+        container_id:"tvchart",
+        width:"100%",
+        height:400,
+        theme:"dark"
+      });
+    }
+  },[data,timeframe]);
+  return (
+    <div>
+      <h3>Monitor</h3>
+      <input value={symbols} onChange={e=>setSymbols(e.target.value)} />
+      <select value={timeframe} onChange={e=>setTimeframe(e.target.value)}>
+        <option value="5m">5m</option>
+        <option value="15m">15m</option>
+        <option value="1h">1h</option>
+        <option value="4h">4h</option>
+        <option value="1d">1d</option>
+        <option value="1w">1w</option>
+      </select>
+ Trading-bot-dev
+      <button onClick={query}>Consultar</button>
+      <div id="tvchart"></div>
+      <table>
+        <thead>
+          <tr><th>Símbolo</th><th>Precio</th><th>EMA20</th><th>EMA50</th><th>RSI14</th></tr>
+        </thead>
+        <tbody>
+        {data.map((r,i)=>(
+          <tr key={i}><td>{r.symbol}</td><td>{r.price}</td><td>{r.ema20}</td><td>{r.ema50}</td><td>{r.rsi}</td></tr>
+        ))}
+        </tbody>
+      </table>
+
+      <button id="btnQuery">Consultar</button>
+      <button id="btnMonitor">Monitorear</button>
+      <button id="btnStop" disabled>Detener</button>
+      <button id="btnClear">Clear</button>
+      <button id="btnTheme">Claro/Oscuro</button>
+      <button id="btnOptions">Opciones</button>
+      <label>Filtro símbolo:  </label><input id="filterSym" placeholder="BTC" style="width:80px" />
+      <label>Gráfica: </label><select id="chartSym" style="margin-right:0.5rem"></select>
+      <div class="countdown" id="countdown"></div>
+      <span id="loading" style="display:none; margin-left:0.5rem;">Cargando...</span>
+      <div id="message" class="message"></div>
+ main
+    </div>
+  );
+}
+
+ Trading-bot-dev
+function Wallet() {
+  const [type,setType] = useState('demo');
+  const [key,setKey] = useState('');
+  const [secret,setSecret] = useState('');
+  const [balances,setBalances] = useState({});
+  async function load() {
+    const res = await fetch('/wallet');
+    if(res.ok){
+      const json = await res.json();
+      if(json.type) setType(json.type);
+      setBalances(json.balances||{});
+    }
+  }
+  async function save(){
+    const body={type};
+    if(type==='binance'){body.api_key=key;body.api_secret=secret;}
+    await fetch('/wallet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    load();
+  }
+  useEffect(()=>{load();},[]);
+  return (
+    <div>
+      <h3>Cartera</h3>
+      <select value={type} onChange={e=>setType(e.target.value)}>
+        <option value="demo">Demo</option>
+        <option value="binance">Binance</option>
+      </select>
+      {type==='binance' && (
+        <span>
+          <input placeholder="API Key" value={key} onChange={e=>setKey(e.target.value)} />
+          <input placeholder="Secret" type="password" value={secret} onChange={e=>setSecret(e.target.value)} />
+        </span>
+      )}
+      <button onClick={save}>Guardar</button>
+      <pre>{JSON.stringify(balances,null,2)}</pre>
+
+    <div id="options">
+      <h3>Opciones</h3>
+      <label>OpenAI:</label>
+      <input id="optOpenAI" type="password" />
+      <label>Binance Key:</label>
+      <input id="optBinance" type="password" />
+      <label>Binance Secret:</label>
+      <input id="optBinanceSecret" type="password" />
+      <button id="btnSaveOpts">Guardar</button>
+      <span id="optMsg" class="message"></span>
+    </div>
+
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th>Fecha (UTC)</th>
+          <th>Símbolo</th>
+          <th>Precio</th>
+          <th>EMA 20</th>
+          <th>EMA 50</th>
+          <th>RSI 14</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div id="chartContainer" style="height:300px; resize:vertical; overflow:auto; margin-top:1rem;">
+      <div id="tv_chart" style="width:100%; height:100%;"></div>
+ main
+    </div>
+  );
+}
+
+ Trading-bot-dev
+function Strategies() {
+  const [name,setName]=useState('');
+  const [body,setBody]=useState('');
+  const [list,setList]=useState([]);
+  async function load(){
+    const res = await fetch('/strategies');
+    if(res.ok){
+      const json = await res.json();
+      setList(json.strategies||[]);
+    }
+  }
+  async function save(){
+    if(!name) return;
+    await fetch('/strategies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,body})});
+    setName('');setBody('');load();
+  }
+  async function del(n){
+    await fetch(`/strategies/${n}`,{method:'DELETE'});load();
+  }
+  async function edit(n){
+    const res=await fetch(`/strategies/${n}`);
+    if(res.ok){
+      const json=await res.json();
+      setName(json.id);setBody(json.strategy.body||'');
+    }
+  }
+  useEffect(()=>{load();},[]);
+  return (
+    <div>
+      <h3>Estrategias</h3>
+      <input placeholder="Nombre" value={name} onChange={e=>setName(e.target.value)} />
+      <input placeholder="Definición" value={body} onChange={e=>setBody(e.target.value)} style={{width:'200px'}} />
+      <button onClick={save}>Guardar</button>
+      <table>
+        <thead><tr><th>Nombre</th><th>Definición</th><th></th></tr></thead>
+        <tbody>
+        {list.map(s=>(
+          <tr key={s.name}><td>{s.name}</td><td>{s.body}</td><td>
+            <button onClick={()=>edit(s.name)}>Editar</button>
+            <button onClick={()=>del(s.name)}>Eliminar</button>
+          </td></tr>
+        ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+    <script src="https://s3.tradingview.com/tv.js"></script>
+    
+    <script>
+      const apiBase = ""; // misma raíz
+      const symbolsEl = document.getElementById("symbols");
+      const timeframeEl = document.getElementById("timeframe");
+      const tbody = document.querySelector("#tbl tbody");
+      const countdownEl = document.getElementById("countdown");
+      const filterEl = document.getElementById("filterSym");
+      const themeBtn = document.getElementById("btnTheme");
+      const loadingEl = document.getElementById("loading");
+      const messageEl = document.getElementById("message");
+      const optionsDiv = document.getElementById("options");
+      const btnOptions = document.getElementById("btnOptions");
+      const btnSaveOpts = document.getElementById("btnSaveOpts");
+      const optMsg = document.getElementById("optMsg");
+      const openaiEl = document.getElementById("optOpenAI");
+      const binanceEl = document.getElementById("optBinance");
+      const binanceSecretEl = document.getElementById("optBinanceSecret");
+      let monitorTimer = null;
+      let refreshSec = 5;
+      const defaultSymbols = ["BTC", "ETH", "XRP", "SOL", "BNB"];
+      const colorPalette = [
+        "#264653",
+        "#2a9d8f",
+        "#e9c46a",
+        "#f4a261",
+        "#e76f51",
+        "#8ab17d",
+        "#6d597a",
+      ];
+      const colorMap = {};
+
+      function showLoading(show) {
+        loadingEl.style.display = show ? "inline" : "none";
+      }
+
+      function showMessage(msg) {
+        messageEl.textContent = msg || "";
+      }
+
+      function loadOptions() {
+        openaiEl.value = localStorage.getItem("openai_key") || "";
+        binanceEl.value = localStorage.getItem("binance_key") || "";
+        binanceSecretEl.value = localStorage.getItem("binance_secret") || "";
+      }
+
+      btnOptions.onclick = () => {
+        optionsDiv.style.display =
+          optionsDiv.style.display === "none" ? "block" : "none";
+      };
+
+      btnSaveOpts.onclick = () => {
+        localStorage.setItem("openai_key", openaiEl.value);
+        localStorage.setItem("binance_key", binanceEl.value);
+        localStorage.setItem("binance_secret", binanceSecretEl.value);
+        optMsg.textContent = "Opciones guardadas";
+        setTimeout(() => (optMsg.textContent = ""), 2000);
+      };
+
+      loadOptions();
+
+      // valores por defecto
+      symbolsEl.value = defaultSymbols.join(",");
+
+      function applyFilter() {
+        const q = filterEl.value.trim().toUpperCase();
+        Array.from(tbody.querySelectorAll("tr")).forEach((row) => {
+          const sym = row.dataset.symbol || "";
+          row.style.display = !q || sym.includes(q) ? "" : "none";
+        });
+      }
+
+      filterEl.addEventListener("input", applyFilter);
+
+      function renderTable(data) {
+        const now = new Date().toISOString().split(".")[0] + "Z"; // UTC time
+        Object.entries(data).forEach(([ticker, vals]) => {
+          const [openP, highP, lowP, closeP, ema20, ema50, rsi] = vals;
+          const price = closeP;
+          const symbol = ticker.replace("BINANCE:", "").replace("USDT", "");
+
+          let tr = tbody.querySelector(`tr[data-symbol="${symbol}"]`);
+          if (!tr) {
+            tr = document.createElement("tr");
+            tr.dataset.symbol = symbol;
+            if (!colorMap[symbol]) {
+              colorMap[symbol] = colorPalette[Object.keys(colorMap).length % colorPalette.length];
+            }
+            tr.style.backgroundColor = colorMap[symbol] + "33";
+            tbody.appendChild(tr);
+          }
+
+          tr.innerHTML = `<td>${now}</td><td>${symbol}</td><td>${Number(price).toFixed(2)}</td><td>${
+            ema20 !== null ? Number(ema20).toFixed(2) : "N/A"}</td><td>${
+            ema50 !== null ? Number(ema50).toFixed(2) : "N/A"}</td><td>${
+            rsi !== null ? Number(rsi).toFixed(2) : "N/A"}</td>`;
+
+          // actualizar gráfico para el primer símbolo (o filtrado)
+          const filterSym = filterEl.value.trim().toUpperCase();
+          if (!filterSym || symbol.includes(filterSym)) {
+            // populate dropdown
+            if (![...chartSelect.options].some((o) => o.value === symbol)) {
+              const opt = document.createElement("option");
+              opt.value = symbol;
+              opt.textContent = symbol;
+              chartSelect.appendChild(opt);
+              if (!chartSelect.value) chartSelect.value = symbol;
+            }
+            if (symbol === chartSelect.value) {
+              createWidget(symbol);
+            }
+          }
+        });
+      }
+
+      async function fetchMarkets() {
+        const symbols = symbolsEl.value.trim();
+        if (!symbols) {
+          showMessage("Ingresa símbolos");
+          return;
+        }
+        showMessage("");
+        showLoading(true);
+        try {
+          const res = await fetch(`${apiBase}/markets?symbols=${symbols}`);
+          if (!res.ok) {
+            showMessage("Error obteniendo datos");
+            return;
+          }
+          const json = await res.json();
+          renderTable(json.data);
+        } finally {
+          showLoading(false);
+        }
+      }
+
+      async function fetchMonitor() {
+        const symbols = symbolsEl.value.trim();
+        const tf = timeframeEl.value;
+        showMessage("");
+        showLoading(true);
+        try {
+          const res = await fetch(`${apiBase}/monitor?symbols=${symbols}&timeframe=${tf}`);
+          if (res.ok) {
+            const json = await res.json();
+            renderTable(json.data);
+            createWidget(chartSelect.value);
+          } else {
+            showMessage("Error obteniendo datos");
+          }
+        } finally {
+          showLoading(false);
+        }
+      }
+
+      document.getElementById("btnQuery").onclick = () => {
+        clearInterval(monitorTimer);
+        document.getElementById("btnStop").disabled = true;
+        fetchMarkets();
+      };
+
+      document.getElementById("btnMonitor").onclick = () => {
+        const symbols = symbolsEl.value.trim();
+        if (!symbols) {
+          showMessage("Ingresa símbolos");
+          return;
+        }
+        showMessage("");
+        refreshSec = 60; // cada minuto
+        fetchMonitor();
+        let remaining = refreshSec;
+        countdownEl.textContent = `Próximo refresco en ${remaining}s`;
+        clearInterval(monitorTimer);
+        monitorTimer = setInterval(() => {
+          remaining -= 1;
+          countdownEl.textContent = `Próximo refresco en ${remaining}s`;
+          if (remaining <= 0) {
+            fetchMonitor();
+            remaining = refreshSec;
+          }
+        }, 1000);
+        document.getElementById("btnStop").disabled = false;
+      };
+
+      document.getElementById("btnStop").onclick = () => {
+        clearInterval(monitorTimer);
+        countdownEl.textContent = "";
+        document.getElementById("btnStop").disabled = true;
+      };
+      document.getElementById("btnClear").onclick = () => {
+        const rows = Array.from(tbody.querySelectorAll("tr"));
+        const seen = new Set();
+        for (let i = rows.length - 1; i >= 0; i--) {
+          const sym = rows[i].dataset.symbol || "";
+          if (seen.has(sym)) {
+            rows[i].remove();
+          } else {
+            seen.add(sym);
+          }
+        }
+        applyFilter();
+      };
+
+      // ------------- TradingView Widget -------------
+      const chartSelect = document.getElementById("chartSym");
+      let tvWidget = null;
+      main
+
+function LLM() {
+  const [prompt,setPrompt]=useState('');
+  const [result,setResult]=useState('');
+  async function suggest(save){
+    const body={prompt}; if(save) body.save=true;
+    const res=await fetch('/llm/strategy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(res.ok){
+      const json=await res.json();
+      setResult(JSON.stringify(json.strategy,null,2));
+    }
+  }
+  return (
+    <div>
+      <h3>Sugerir estrategia con LLM</h3>
+      <input value={prompt} onChange={e=>setPrompt(e.target.value)} style={{width:'200px'}} />
+      <button onClick={()=>suggest(false)}>Sugerir</button>
+      <button onClick={()=>suggest(true)}>Guardar</button>
+      <pre style={{whiteSpace:'pre-wrap'}}>{result}</pre>
+    </div>
+  );
+}
+
+function Orders() {
+  const [list,setList]=useState([]);
+  const [active,setActive]=useState(false);
+  async function load(){
+    const res=await fetch('/orders');
+    if(res.ok){
+      const json=await res.json();
+      setList(json||[]);
+    }
+  }
+  async function toggle(){
+    if(active){await fetch('/bot/stop',{method:'POST'});}
+    else {await fetch('/bot/start',{method:'POST'});}
+    setActive(!active);
+  }
+  useEffect(()=>{load();},[]);
+  return (
+    <div>
+      <h3>Órdenes ejecutadas</h3>
+      <button onClick={toggle}>{active?'Desactivar bot':'Activar bot'}</button>
+      <table>
+        <thead><tr><th>Fecha</th><th>Símbolo</th><th>Lado</th><th>Cantidad</th><th>Precio</th></tr></thead>
+        <tbody>
+        {list.map((o,i)=>(
+          <tr key={i}><td>{o.time}</td><td>{o.symbol}</td><td>{o.side}</td><td>{o.qty}</td><td>{o.price}</td></tr>
+        ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Options() {
+  const [openai,setOpenai]=useState('');
+  const [bkey,setBkey]=useState('');
+  const [bsec,setBsec]=useState('');
+  async function load(){
+    const res=await fetch('/options');
+    if(res.ok){
+      const j=await res.json();
+      setOpenai(j.openai_key||'');
+      setBkey(j.binance_key||'');
+      setBsec(j.binance_secret||'');
+    }
+  }
+  async function save(){
+    await fetch('/options',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({openai_key:openai,binance_key:bkey,binance_secret:bsec})});
+  }
+  useEffect(()=>{load();},[]);
+  return (
+    <div>
+      <h3>Opciones</h3>
+      <input placeholder="OpenAI Key" value={openai} onChange={e=>setOpenai(e.target.value)} />
+      <input placeholder="Binance Key" value={bkey} onChange={e=>setBkey(e.target.value)} />
+      <input placeholder="Binance Secret" type="password" value={bsec} onChange={e=>setBsec(e.target.value)} />
+      <button onClick={save}>Guardar</button>
+    </div>
+  );
+}
+
+function User() {
+  return (<div><h3>Usuario</h3><p>Próximamente</p></div>);
+}
+
+function App(){
+  const [section,setSection]=useState('dashboard');
+  let content=null;
+  if(section==='dashboard') content=<Dashboard/>;
+  else if(section==='wallet') content=<Wallet/>;
+  else if(section==='strategies') content=<Strategies/>;
+  else if(section==='llm') content=<LLM/>;
+  else if(section==='orders') content=<Orders/>;
+  else if(section==='options') content=<Options/>;
+  else if(section==='user') content=<User/>;
+  return (
+    <div className="container">
+      <Menu current={section} onChange={setSection}/>
+      <div className="content">{content}</div>
+    </div>
+  );
+}
+
+ReactDOM.render(<App/>, document.getElementById('root'));
+</script>
+</body>
+</html>
