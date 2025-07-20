@@ -10,11 +10,20 @@ interface WalletResponse {
 }
 
 export default function BalanceWidget() {
+  const [selected, setSelected] = useState<string>("demo");
   const { data, error, isLoading } = useSWR<WalletResponse>("/api/wallet", fetcher);
 
   const balance = data?.balances?.USDT ?? 0;
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      <Autocomplete
+        size="small"
+        options={[{ id: "demo", name: "Demo" }]}
+        getOptionLabel={(o) => o.name}
+        value={{ id: selected, name: "Demo" }}
+        onChange={(_, val) => val && setSelected(val.id)}
+        renderInput={(params) => <TextField {...params} label="Cartera" />}
+      />
       {isLoading && <Typography variant="body2">Loading…</Typography>}
       {error && <Typography variant="body2" color="error">Error</Typography>}
       {data && (
