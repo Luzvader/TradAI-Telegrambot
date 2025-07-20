@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { TextField, IconButton, Box, Typography } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
+import { fetcher } from "../utils/fetcher";
 
 export default function ChatWidget() {
   const [msg, setMsg] = useState("");
@@ -10,21 +11,23 @@ export default function ChatWidget() {
     text: string;
   }
   const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = msg.trim();
     if (!trimmed) return;
     setMessages((prev) => [...prev, { sender: "user", text: trimmed }]);
-    fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: trimmed }),
-    })
-      .then((res) => (res.ok ? res.json() : Promise.reject("error")))
-      .then((data) =>
-        setMessages((prev) => [...prev, { sender: "bot", text: data.reply }])
-      )
-      .catch(() => {});
+    try {
+      const data = await fetcher<{ reply: string }>("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ message: trimmed }),
+        headers: { "Content-Type": "application/json" },
+      });
+      setMessages((prev) => [...prev, { sender: "bot", text: data.reply }]);
+      setError(null);
+    } catch {
+      setError("Error al enviar el mensaje.");
+    }
     setMsg("");
   };
 
@@ -50,6 +53,11 @@ export default function ChatWidget() {
           </Typography>
         ))}
       </Box>
+      {error && (
+        <Typography variant="body2" color="error" sx={{ mb: 1 }}>
+          {error}
+        </Typography>
+      )}
       {/* Input */}
       <TextField
         sx={{ flexShrink: 0 }}
