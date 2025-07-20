@@ -18,7 +18,23 @@ export default function BalanceWidget() {
 
   const balance = error ? 10000 : data?.balances?.USDT ?? 0;
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+    <Box sx={{ 
+      display: "flex", 
+      flexDirection: "column", 
+      gap: 2, 
+      minHeight: 400,
+      p: 2,
+      '& .MuiAutocomplete-root': {
+        width: '100%',
+        maxWidth: 300,
+        mb: 2
+      },
+      '& .MuiTypography-h6': {
+        fontSize: '1.5rem',
+        fontWeight: 'bold',
+        color: 'primary.main'
+      }
+    }}>
       <Autocomplete
         size="small"
         options={[{ id: "demo", name: "Demo" }]}
@@ -32,9 +48,17 @@ export default function BalanceWidget() {
       {data && (
         <>
           <Typography variant="body2">Wallet: {data.type ?? "-"}</Typography>
-          <Typography variant="h6" sx={{ mt: 1 }}>
-            {balance.toFixed(2)} USDT
-          </Typography>
+          <Box sx={{ 
+            bgcolor: 'background.paper', 
+            p: 2, 
+            borderRadius: 1,
+            boxShadow: 1,
+            mt: 2
+          }}>
+            <Typography variant="h6">
+              {balance.toFixed(2)} USDT
+            </Typography>
+          </Box>
         </>
       )}
     </Box>

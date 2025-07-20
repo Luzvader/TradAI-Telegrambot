@@ -55,7 +55,8 @@ app = FastAPI(title="TradAI Web API")
 
 @app.get("/markets")
 def get_markets(
-    symbols: str | None = Query(None, description="Símbolos separados por coma")
+    symbols: str | None = Query(None, description="Símbolos separados por coma"),
+    period: str = Query("24h", description="1h,3h,6h,24h,3d,1w,1m,6m,1y"),
 ):
     """Devuelve datos de mercado básicos de TradingView."""
     symbols_list: List[str]
@@ -64,7 +65,7 @@ def get_markets(
     else:
         symbols_list = DEFAULT_SYMBOLS
 
-    data = fetch_basic(symbols_list)
+    data = fetch_basic(symbols_list, period)
     return {"symbols": symbols_list, "data": data}
 
 

@@ -33,17 +33,20 @@ npm_exe = "npm.cmd" if os.name == "nt" else "npm"
 CERT_DIR = Path.home() / ".tradai_ssl"
 CERT_FILE = CERT_DIR / "cert.pem"
 KEY_FILE = CERT_DIR / "key.pem"
-# Command to start Next.js dev server; HTTPS enabled via env vars set below
-FRONTEND_CMD: List[str] = [npm_exe, "run", "dev:https"]
+# Command to start Next.js dev server (HTTP); rewrites proxy via next.config.js
+FRONTEND_CMD: List[str] = [npm_exe, "run", "dev"]
 
 backend_proc = None  # type: subprocess.Popen | None
 frontend_proc = None  # type: subprocess.Popen | None
 
 
-def start_process(cmd: List[str], cwd: Path | None = None, https_env: bool = False) -> subprocess.Popen:  # noqa: D401
+def start_process(cmd: List[str], cwd: Path | None = None, https_env: bool = False, extra_env: dict | None = None) -> subprocess.Popen:  # noqa: D401
     """Start *cmd* in *cwd* returning the Popen instance (stdout/stderr inherited)."""
 
     env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+    # Not enabling HTTPS for frontend now; backend will run HTTP
     if https_env:
         env.update({
             "HTTPS": "true",
@@ -67,10 +70,10 @@ def main() -> None:  # noqa: D401
     global backend_proc, frontend_proc
 
     print("Starting TradAI backend...")
-    backend_proc = start_process(BACKEND_CMD)
+    backend_proc = start_process(BACKEND_CMD, extra_env={"TRADAI_HTTP": "1"})
 
     print("Starting TradAI frontend (Next.js)...")
-    frontend_proc = start_process(FRONTEND_CMD, cwd=FRONTEND_DIR, https_env=True)
+    frontend_proc = start_process(FRONTEND_CMD, cwd=FRONTEND_DIR, https_env=False)
 
     def _signal_handler(signum, frame):  # noqa: D401
         print("\nStopping servers... (signal", signum, ")")

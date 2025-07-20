@@ -8,21 +8,49 @@ from __future__ import annotations
 
 from typing import List, Sequence
 
+PERIOD_MAP = {
+    "1h": "60",
+    "3h": "180",
+    "6h": "360",
+    "24h": None,  # default daily change
+    "3d": "3D",
+    "1w": "1W",
+    "1m": "1M",
+    "6m": "6M",
+    "1y": "12M",
+}
+
 from ..tradingview import TradingViewClient, columns_for_timeframe
 
 _client = TradingViewClient()
 
 DEFAULT_SYMBOLS: Sequence[str] = ("BTC", "ETH", "XRP", "SOL", "BNB")
 
-def fetch_basic(symbols: Sequence[str] | None = None):
-    """Return latest price and change for the given symbols."""
+def fetch_basic(symbols: Sequence[str] | None = None, period: str = "24h"):
+    """Return latest price and change (% change) for the given symbols and period."""
     if symbols is None:
         symbols = DEFAULT_SYMBOLS
-    return _client.fetch_markets(list(symbols))
+
+    res = PERIOD_MAP.get(period, None)
+    suffix = f"|{res}" if res else ""
+    cols = [
+        "close",
+        f"change{suffix}",
+    ]
+    raw = _client.fetch_markets(list(symbols), columns=cols)
+    # Convert keys like 'BINANCE:BTCUSDT' -> 'BTC'
+    cleaned = {
+        key.split(":")[1].removesuffix("USDT"): val for key, val in raw.items()
+    }
+    return cleaned
 
 def fetch_with_indicators(symbols: Sequence[str] | None, timeframe: str):
     """Return price plus indicators for symbols and timeframe."""
     if symbols is None:
         symbols = DEFAULT_SYMBOLS
     cols = columns_for_timeframe(timeframe)
-    return _client.fetch_markets(list(symbols), columns=cols)
+    raw = _client.fetch_markets(list(symbols), columns=cols)
+    cleaned = {
+        key.split(":")[1].removesuffix("USDT"): val for key, val in raw.items()
+    }
+    return cleaned
