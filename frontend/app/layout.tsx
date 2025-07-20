@@ -2,6 +2,8 @@
 import * as React from "react";
 import { CssBaseline, ThemeProvider, createTheme } from "@mui/material";
 import NavBar from "../components/NavBar";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
 
 
 
