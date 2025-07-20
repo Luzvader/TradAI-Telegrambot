@@ -2,6 +2,7 @@
 import * as React from "react";
 import { CssBaseline, ThemeProvider, createTheme } from "@mui/material";
 import NavBar from "../components/NavBar";
+import "./globals.css";
 
 
 
