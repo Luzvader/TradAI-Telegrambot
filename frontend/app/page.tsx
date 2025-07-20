@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Box, Container, Typography } from "@mui/material";
 import dynamic from 'next/dynamic';
-import { Resizable, ResizableBox, ResizeCallbackData } from 'react-resizable';
+import { Resizable, ResizableProps, ResizeCallbackData } from 'react-resizable';
 import 'react-resizable/css/styles.css';
 
 // Dynamically import widgets with no SSR to avoid window is not defined errors
@@ -24,6 +24,10 @@ interface WidgetProps {
   defaultSize: WidgetSize;
 }
 
+interface WidgetLayout extends Omit<WidgetProps, 'content'> {
+  // For localStorage serialization
+}
+
 const widgetStyles = {
   bgcolor: 'background.paper',
   border: '1px solid',
@@ -36,6 +40,7 @@ const widgetStyles = {
   flexDirection: 'column',
   cursor: 'grab',
   position: 'relative',
+  overflow: 'hidden',
   '&:active': {
     cursor: 'grabbing',
   },
@@ -44,26 +49,42 @@ const widgetStyles = {
     boxShadow: 3,
     transform: 'translateY(-2px)',
     borderColor: 'primary.main',
+    '& .resize-handle': {
+      opacity: 1,
+    },
+  },
+  '& .react-resizable': {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    '&:hover': {
+      '& .resize-handle': {
+        opacity: 1,
+      },
+    },
   },
   '& .resize-handle': {
     position: 'absolute',
     right: 0,
     bottom: 0,
-    width: 20,
-    height: 20,
+    width: 24,
+    height: 24,
     cursor: 'nwse-resize',
-    '&:before': {
+    opacity: 0,
+    transition: 'opacity 0.2s ease',
+    '&:after': {
       content: '""',
       position: 'absolute',
       right: 4,
       bottom: 4,
-      width: 8,
-      height: 8,
+      width: 12,
+      height: 12,
       borderRight: '2px solid',
       borderBottom: '2px solid',
       borderColor: 'action.active',
+      transition: 'border-color 0.2s ease',
     },
-    '&:hover:before': {
+    '&:hover:after': {
       borderColor: 'primary.main',
     },
   },
@@ -105,92 +126,172 @@ export default function Dashboard() {
 
   const [draggedWidget, setDraggedWidget] = useState<WidgetProps | null>(null);
   const widgetRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
-  const [isDragging, setIsDragging] = useState(false);
-  const [widgets, setWidgets] = useState<WidgetProps[]>([
-    { 
-      id: 'balance', 
-      title: 'Balance', 
-      content: <BalanceWidget />, 
-      defaultSize: { w: 4, h: 1 } 
-    },
-    { 
-      id: 'prices', 
-      title: 'Market Prices', 
-      content: <PricesWidget />, 
-      defaultSize: { w: 12, h: 2 } 
-    },
-    { 
-      id: 'pnl', 
-      title: 'P&L', 
-      content: <PnlWidget />, 
-      defaultSize: { w: 8, h: 2 } 
-    },
-    { 
-      id: 'chart', 
-      title: 'Trading Chart', 
-      content: <TVChartWidget />, 
-      defaultSize: { w: 12, h: 3 } 
-    },
-    { 
-      id: 'strategies', 
-      title: 'Strategies', 
-      content: <StrategiesWidget />, 
-      defaultSize: { w: 4, h: 2 } 
-    },
-  ]);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [dragPreview, setDragPreview] = useState<{width: number; height: number} | null>(null);
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, widget: WidgetProps) => {
-    if (resizeState.isResizing) {
+    if (isResizing) {
       e.preventDefault();
       return;
     }
     setDraggedWidget(widget);
+    
+    // Set drag image for better visual feedback
+    const target = e.currentTarget;
+    setDragPreview({
+      width: target.offsetWidth,
+      height: target.offsetHeight
+    });
+    
+    // Create a custom drag image for better visual feedback
+    const dragImage = document.createElement('div');
+    dragImage.style.position = 'absolute';
+    dragImage.style.top = '-1000px';
+    dragImage.style.left = '-1000px';
+    dragImage.style.width = `${target.offsetWidth}px`;
+    dragImage.style.height = `${target.offsetHeight}px`;
+    dragImage.style.backgroundColor = 'rgba(25, 118, 210, 0.1)';
+    dragImage.style.border = '2px dashed #1976d2';
+    dragImage.style.borderRadius = '4px';
+    document.body.appendChild(dragImage);
+    
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/html', '');
+    e.dataTransfer.setDragImage(dragImage, 0, 0);
+    
+    // Clean up the drag image after a short delay
+    setTimeout(() => document.body.removeChild(dragImage), 0);
   };
 
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>, targetId: string) => {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = 'move';
+    
+    if (draggedWidget && draggedWidget.id !== targetId) {
+      setDragOverId(targetId);
+    }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>, targetId: string) => {
     e.preventDefault();
-    if (resizeState.isResizing || !draggedWidget || draggedWidget.id === targetId) return;
+    if (isResizing || !draggedWidget || draggedWidget.id === targetId) {
+      setDragOverId(null);
+      return;
+    }
 
     setWidgets(prevWidgets => {
-      const draggedIndex = prevWidgets.findIndex(w => w.id === draggedWidget.id);
-      const targetIndex = prevWidgets.findIndex(w => w.id === targetId);
+      const newWidgets = [...prevWidgets];
+      const draggedIndex = newWidgets.findIndex(w => w.id === draggedWidget.id);
+      const targetIndex = newWidgets.findIndex(w => w.id === targetId);
       
       if (draggedIndex === -1 || targetIndex === -1) return prevWidgets;
       
-      const newWidgets = [...prevWidgets];
       const [removed] = newWidgets.splice(draggedIndex, 1);
       newWidgets.splice(targetIndex, 0, removed);
       
+      // Save to localStorage
+      saveWidgetsToLocalStorage(newWidgets);
+      
       return newWidgets;
     });
+    
+    setDragOverId(null);
   };
 
-  const onResize = useCallback((id: string, size: WidgetSize) => {
-    setWidgets(prevWidgets => 
-      prevWidgets.map(widget => 
-        widget.id === id
-          ? { 
-              ...widget, 
-              defaultSize: { 
-                w: Math.max(1, Math.min(12, Math.round(size.w))),
-                h: Math.max(1, Math.min(4, Math.round(size.h)))
-              } 
-            } 
-          : widget
-      )
-    );
+  const saveWidgetsToLocalStorage = useCallback((widgetsToSave: WidgetProps[]) => {
+    if (typeof window !== 'undefined') {
+      const widgetsForStorage: WidgetLayout[] = widgetsToSave.map(({ id, title, defaultSize }) => ({
+        id,
+        title,
+        defaultSize
+      }));
+      localStorage.setItem('dashboardLayout', JSON.stringify(widgetsForStorage));
+    }
   }, []);
 
-  const handleResize = useCallback((id: string, e: any, { size }: ResizeCallbackData) => {
-    onResize(id, { w: size.width / 100, h: size.height / 100 });
-  }, [onResize]);
+  // Track the current widget being resized and its preview size
+  const [resizingWidget, setResizingWidget] = useState<{
+    id: string;
+    size: { width: number; height: number };
+    startSize: { width: number; height: number };
+  } | null>(null);
+
+  const handleResizeStart = useCallback((id: string) => {
+    setIsResizing(true);
+    const widget = widgets.find(w => w.id === id);
+    if (!widget) return;
+    
+    const startWidth = widget.defaultSize.w * 100;
+    const startHeight = widget.defaultSize.h * 150;
+    
+    setResizingWidget({
+      id,
+      size: { width: startWidth, height: startHeight },
+      startSize: { width: startWidth, height: startHeight }
+    });
+  }, [widgets]);
+
+  const handleResize = useCallback((id: string, _e: React.SyntheticEvent, { size }: ResizeCallbackData) => {
+    setResizingWidget(prev => {
+      if (!prev || prev.id !== id) return prev;
+      
+      // Calculate grid-aligned size
+      const gridColWidth = 100; // Width of one grid column in pixels
+      const gridRowHeight = 150; // Height of one grid row in pixels
+      
+      // Snap to nearest grid multiple
+      const snappedWidth = Math.max(
+        100, // min width
+        Math.min(1200, // max width
+          Math.round(size.width / gridColWidth) * gridColWidth
+        )
+      );
+      
+      const snappedHeight = Math.max(
+        150, // min height
+        Math.min(600, // max height
+          Math.round(size.height / gridRowHeight) * gridRowHeight
+        )
+      );
+      
+      return {
+        ...prev,
+        size: { width: snappedWidth, height: snappedHeight }
+      };
+    });
+  }, []);
+
+  const handleResizeStop = useCallback((id: string) => {
+    setIsResizing(false);
+    
+    if (!resizingWidget || resizingWidget.id !== id) return;
+    
+    setWidgets(prevWidgets => {
+      const newWidgets = prevWidgets.map(widget => {
+        if (widget.id === id) {
+          const newWidth = Math.max(1, Math.min(12, Math.round(resizingWidget.size.width / 100)));
+          const newHeight = Math.max(1, Math.min(4, Math.round(resizingWidget.size.height / 150)));
+          
+          return {
+            ...widget,
+            defaultSize: {
+              w: newWidth,
+              h: newHeight
+            }
+          };
+        }
+        return widget;
+      });
+      
+      // Save to localStorage after resize completes
+      saveWidgetsToLocalStorage(newWidgets);
+      return newWidgets;
+    });
+    
+    setResizingWidget(null);
+  }, [resizingWidget, saveWidgetsToLocalStorage]);
 
   const gridProps = {
     container: true,
@@ -218,63 +319,44 @@ export default function Dashboard() {
     },
   };
 
+  const getDefaultContent = (widgetId: string): React.ReactNode => {
+    const content = {
+      'balance': <BalanceWidget />,
+      'pnl': <PnlWidget />,
+      'strategies': <StrategiesWidget />,
+      'prices': <PricesWidget />,
+      'chart': <Box sx={{ flex: 1, minHeight: 400, width: '100%' }}><TVChartWidget /></Box>,
+    }[widgetId];
+    
+    return content || null;
+  };
+
   // Load saved layout from localStorage on component mount
   useEffect(() => {
-    const savedLayout = typeof window !== 'undefined' ? localStorage.getItem('dashboardLayout') : null;
-    if (savedLayout) {
-      try {
-        const parsedLayout = JSON.parse(savedLayout);
-        // Map the saved layout back to full widget objects
-        const fullWidgets = parsedLayout.map((savedWidget: any) => {
-          const originalWidget = widgets.find(w => w.id === savedWidget.id);
-          return originalWidget || {
-            id: savedWidget.id,
-            title: savedWidget.title,
+    try {
+      const savedLayout = typeof window !== 'undefined' ? localStorage.getItem('dashboardLayout') : null;
+      if (savedLayout) {
+        const parsedLayout = JSON.parse(savedLayout) as WidgetLayout[];
+        // Only update if we have a valid layout
+        if (Array.isArray(parsedLayout) && parsedLayout.length > 0) {
+          // Map the saved layout back to full widget objects
+          const fullWidgets = parsedLayout.map(savedWidget => ({
+            ...savedWidget,
             content: getDefaultContent(savedWidget.id),
-            defaultSize: savedWidget.defaultSize
-          };
-        });
-        setWidgets(fullWidgets);
-      } catch (e) {
-        console.error('Failed to load saved layout', e);
+          }));
+          setWidgets(fullWidgets);
+        }
       }
+    } catch (e) {
+      console.error('Failed to load saved layout', e);
+      // Reset to default layout if there's an error
+      localStorage.removeItem('dashboardLayout');
     }
   }, []);
 
-  // Helper function to get default content for a widget
-  const getDefaultContent = (widgetId: string) => {
-    switch (widgetId) {
-      case 'balance':
-        return <BalanceWidget />;
-      case 'pnl':
-        return <PnlWidget />;
-      case 'strategies':
-        return <StrategiesWidget />;
-      case 'prices':
-        return <PricesWidget />;
-      case 'chart':
-        return <Box sx={{ flex: 1, minHeight: 400, width: '100%' }}><TVChartWidget /></Box>;
-      default:
-        return null;
-    }
-  };
-
-  // Save layout to localStorage when it changes
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      // Create a simplified version of widgets for storage
-      const widgetsForStorage = widgets.map(({ id, title, defaultSize }) => ({
-        id,
-        title,
-        defaultSize
-      }));
-      localStorage.setItem('dashboardLayout', JSON.stringify(widgetsForStorage));
-    }
-  }, [widgets]);
-
   return (
-    <Container maxWidth={false} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Box sx={{ py: 3 }}>
+    <Container maxWidth={false} sx={{ height: '100vh', display: 'flex', flexDirection: 'column', p: 2 }}>
+      <Box sx={{ py: 2 }}>
         <Typography variant="h4" component="h1" gutterBottom>
           Dashboard
         </Typography>
@@ -300,7 +382,7 @@ export default function Dashboard() {
             height: 20,
             bottom: 0,
             right: 0,
-            background: `url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2IDYiIHN0eWxlPSJiYWNrZ3JvdW5kLWNvbG9yOiNmZmZmZmYwMCIgeD0iMHB4IiB5PSIwcHgiIHdpZHRoPSI2cHgiIGhlaWdodD0iNnB4Ij48ZyBvcGFjaXR5PSIwLjMwMiI+PHBhdGggZD0iTSA2IDYgTCAwIDYgTCAwIDQuMiBMIDQgNC4yIEwgNC4yIDQuMiBaIiBmaWxsPSIjMDAwMDAwIi8+PC9nPjwvc3ZnPg==')`,
+            background: `url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2IDYiIHN0eWxlPSJiYWNrZ3JvdW5kLWNvbG9yOiNmZmZmZmYwMCIgeD0iMHB4IiB5PSIwcHgiIHdpZHRoPSI2cHgiIGhlaWdodD0iNnB4Ij48ZyBvcGFjaXR5PSIwLjMwMiI+PHBhdGggZD0iTSA2IDYgTCAwIDYgTCAwIDQuMiBMIDQgNC4yIEwgNC4yIDQuMiBaIiBmaWxsPSIjMDAwMDAwIi8+PC9nPjwvc3ZnPg==`,
             backgroundPosition: 'bottom right',
             padding: '0 3px 3px 0',
             backgroundRepeat: 'no-repeat',
@@ -325,64 +407,96 @@ export default function Dashboard() {
         }}
       >
         {widgets.map((widget) => (
-          <Resizable
+          <Box
             key={widget.id}
-            width={widget.defaultSize.w * 100}
-            height={widget.defaultSize.h * 150}
-            onResize={(e, data) => handleResize(widget.id, e, data)}
-            onResizeStart={() => setIsDragging(true)}
-            onResizeStop={() => setIsDragging(false)}
-            resizeHandles={['se']}
-            minConstraints={[100, 150]}
-            maxConstraints={[1200, 600]}
-            draggableOpts={{ enableUserSelectHack: false }}
+            sx={{
+              ...widgetStyles,
+              gridColumn: `span ${Math.min(12, widget.defaultSize.w)}`,
+              gridRow: `span ${widget.defaultSize.h}`,
+              minHeight: '150px',
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative',
+              '&:hover .resize-handle': {
+                opacity: 1,
+              },
+            }}
           >
             <Box
               ref={(el: HTMLDivElement | null) => (widgetRefs.current[widget.id] = el)}
-              draggable={!isDragging}
-              onDragStart={(e) => !isDragging && handleDragStart(e, widget)}
-              onDragOver={handleDragOver}
+              draggable={!isResizing}
+              onDragStart={(e) => !isResizing && handleDragStart(e, widget)}
+              onDragOver={(e) => handleDragOver(e, widget.id)}
               onDrop={(e) => handleDrop(e, widget.id)}
+              onDragLeave={() => setDragOverId(null)}
+              onDragEnd={() => setDragOverId(null)}
               sx={{
-                ...widgetStyles,
                 width: '100%',
                 height: '100%',
-                minHeight: '100%',
-                '&:hover': {
-                  boxShadow: 3,
-                  transform: 'translateY(-2px)',
-                },
-                cursor: 'grab',
-                '&:active': {
-                  cursor: 'grabbing',
-                },
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                opacity: dragOverId === widget.id ? 0.5 : 1,
+                transition: 'opacity 0.2s ease',
+                border: dragOverId === widget.id ? '2px dashed #1976d2' : 'none',
+                borderRadius: '4px',
               }}
             >
-              <Typography variant="h6" sx={{ fontWeight: 'medium' }}>
-                {widget.title}
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Box 
-                  className="resize-handle"
-                  onMouseDown={(e) => handleResizeStart(e, widget)}
-                  onDragStart={(e) => e.preventDefault()}
-                  sx={{
-                    '&:active': {
-                      cursor: 'nwse-resize',
-                    },
-                  }}
-                />
+              <Box sx={{ 
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                p: 1,
+                borderBottom: '1px solid',
+                borderColor: 'divider',
+              }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 'medium' }}>
+                  {widget.title}
+                </Typography>
+              </Box>
+              <Box sx={{ flex: 1, overflow: 'auto', p: 1 }}>
+                {widget.content}
               </Box>
             </Box>
-            <Box sx={{ flex: 1, overflow: 'hidden' }}>
-              {widget.content}
+            <Resizable
+              width={resizingWidget?.id === widget.id ? resizingWidget.size.width : widget.defaultSize.w * 100}
+              height={resizingWidget?.id === widget.id ? resizingWidget.size.height : widget.defaultSize.h * 150}
+              onResize={(e: React.SyntheticEvent, data: ResizeCallbackData) => handleResize(widget.id, e, data)}
+              onResizeStart={() => handleResizeStart(widget.id)}
+              onResizeStop={() => handleResizeStop(widget.id)}
+              resizeHandles={['se']}
+              minConstraints={[100, 150]}
+              maxConstraints={[1200, 600]}
+              draggableOpts={{ enableUserSelectHack: false }}
+              className="resizable-container"
+              style={{
+                // Reset any inherited styles that might interfere
+                background: 'transparent',
+                position: 'relative',
+              }}
+            >
+              <div 
+                className="resize-handle" 
+                style={{
+                  position: 'absolute',
+                  bottom: 0,
+                  right: 0,
+                  width: 20,
+                  height: 20,
+                  background: 'transparent',
+                  cursor: 'se-resize',
+                  opacity: 0,
+                  transition: 'opacity 0.2s',
+                  zIndex: 10, // Ensure handle is above other elements
+                }}
+                onMouseDown={(e) => {
+                  // Prevent drag events from firing when resizing
+                  e.stopPropagation();
+                }}
+              />
             </Box>
           </Box>
-        </Resizable>
-      ))}
-    </Box>
-  </Container>
-);
+        ))}
       </Box>
     </Container>
   );
