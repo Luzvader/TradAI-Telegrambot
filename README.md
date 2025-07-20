@@ -117,8 +117,9 @@ Consulta Swagger para parámetros detallados y ejemplos.
 | `OPENAI_API_KEY`    | Generación de estrategias con LLM |
 | `BINANCE_API_KEY`   | Trading en cuenta real           |
 | `BINANCE_API_SECRET`| «                                |
+| `API_BASE_URL`      | URL base de la API (por defecto `http://127.0.0.1:8000`) |
 
-También puedes guardar estas claves vía `POST /options` o en la sección **Settings** del panel.
+También puedes guardar estas claves vía `POST /options` o en la sección **Settings** del panel. `API_BASE_URL` puede definirse en `.env.local` o en el entorno de despliegue.
 
 ---
 
