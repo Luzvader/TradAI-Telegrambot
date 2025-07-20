@@ -98,5 +98,4 @@ class BotEngine:
             self.run_once()
             if stop_event and stop_event.wait(self.interval * 60):
                 break
-            time.sleep(self.interval * 60)
 
