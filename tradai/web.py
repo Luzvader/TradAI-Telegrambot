@@ -219,4 +219,13 @@ def get_pnl():
     pnl = svc_calculate_pnl()
     return {"pnl": pnl}
 
+
+@app.post("/chat")
+def chat_route(payload: dict = Body(...)):
+    """Very simple echo chat endpoint."""
+    msg = payload.get("message")
+    if not msg:
+        raise HTTPException(status_code=400, detail="message requerido")
+    return {"reply": msg}
+
 __all__ = ["app", "DEFAULT_SYMBOLS", "TradingViewClient"]

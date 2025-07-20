@@ -5,14 +5,27 @@ import SendIcon from "@mui/icons-material/Send";
 
 export default function ChatWidget() {
   const [msg, setMsg] = useState("");
-  const [messages, setMessages] = useState<string[]>([]);
+  interface ChatMsg {
+    sender: "user" | "bot";
+    text: string;
+  }
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
 
   const handleSend = () => {
     const trimmed = msg.trim();
     if (!trimmed) return;
-    setMessages((prev) => [...prev, trimmed]);
+    setMessages((prev) => [...prev, { sender: "user", text: trimmed }]);
+    fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: trimmed }),
+    })
+      .then((res) => (res.ok ? res.json() : Promise.reject("error")))
+      .then((data) =>
+        setMessages((prev) => [...prev, { sender: "bot", text: data.reply }])
+      )
+      .catch(() => {});
     setMsg("");
-    // TODO: send to backend
   };
 
   return (
@@ -33,7 +46,7 @@ export default function ChatWidget() {
       >
         {messages.map((m, i) => (
           <Typography variant="body2" key={i} sx={{ mb: 0.5 }}>
-            {m}
+            <strong>{m.sender === "user" ? "Tú" : "Bot"}:</strong> {m.text}
           </Typography>
         ))}
       </Box>
