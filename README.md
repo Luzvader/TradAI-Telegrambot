@@ -128,4 +128,4 @@ TradAI funciona en cualquier VPS/VM con Python y Node. Para producción:
 
 ## 10. Licencia
 
-MIT © 2025 – Tu Nombre
+MIT © 2025 – José Martínez Montero
