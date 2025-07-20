@@ -20,7 +20,7 @@ export default function WidgetFrame({ title, children }: Props) {
         overflow: "hidden",
       }}
     >
-      <h4 className="widget-drag-handle" style={{ cursor: "move" }}>{title}</h4>
+      <h4>{title}</h4>
       {children}
     </Paper>
   );

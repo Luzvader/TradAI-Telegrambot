@@ -1,29 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Box, Button, Stack } from "@mui/material";
-import { WidthProvider, Responsive } from "react-grid-layout";
+import { Box, Button, Stack, Grid } from "@mui/material";
 import WidgetFrame from "./WidgetFrame";
 import { DEFAULT_WIDGETS, WidgetConfig } from "../widgets/widgetConfig";
-
-const ResponsiveGridLayout = WidthProvider(Responsive);
-
 
 export default function DashboardLayout() {
   const [widgets, setWidgets] = useState<WidgetConfig[]>(DEFAULT_WIDGETS);
 
-  const layout = widgets
-    .filter((w) => w.visible)
-    .map((w) => ({ ...w.defaultLayout, i: w.key }));
 
-  // Prepare layouts for responsive breakpoints
-  const layouts = {
-    lg: layout,
-    md: layout,
-    sm: layout,
-  };
-
-  // Persist layout/visibility in localStorage
+  // Persist visibility in localStorage
   useEffect(() => {
     const saved = localStorage.getItem("dashboard-widgets");
     if (saved) {
@@ -67,27 +53,22 @@ export default function DashboardLayout() {
           </Button>
         ))}
       </Stack>
-      <ResponsiveGridLayout
-        className="layout"
-        layouts={layouts}
-        breakpoints={{ lg: 1200, md: 996, sm: 768 }}
-        cols={{ lg: 12, md: 10, sm: 6 }}
-        rowHeight={30}
-        isDraggable
-        isResizable
-        resizeHandles={["s","w","e","n","sw","nw","se","ne"]}
-        margin={[8, 8]}
-        draggableHandle=".widget-drag-handle"
-        draggableCancel="input,textarea,button,select,option,.no-drag"
-      >
+      <Grid container spacing={2}>
         {widgets
           .filter((w) => w.visible)
           .map((w) => (
-            <WidgetFrame key={w.key} title={w.name}>
-              {w.component}
-            </WidgetFrame>
+            <Grid
+              key={w.key}
+              item
+              xs={12}
+              md={w.cols}
+              lg={w.cols}
+              sx={w.height ? { height: w.height } : undefined}
+            >
+              <WidgetFrame title={w.name}>{w.component}</WidgetFrame>
+            </Grid>
           ))}
-      </ResponsiveGridLayout>
+      </Grid>
     </Box>
   );
 }
