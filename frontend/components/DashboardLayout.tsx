@@ -1,7 +1,8 @@
 "use client";
 
 import { ReactNode, useEffect, useState } from "react";
-import GridLayout, { Layout } from "react-grid-layout";
+import { Box, Button, Paper, Stack } from "@mui/material";
+import { WidthProvider, Responsive, Layout } from "react-grid-layout";
 import BalanceWidget from "./BalanceWidget";
 import PricesWidget from "./PricesWidget";
 import TVChartWidget from "./TVChartWidget";
@@ -10,6 +11,8 @@ import ChatWidget from "./ChatWidget";
 import PnlWidget from "./PnlWidget";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
+
+const ResponsiveGridLayout = WidthProvider(Responsive);
 
 interface WidgetConfig {
   key: string;
@@ -38,7 +41,7 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
     key: "chart",
     name: "Market Chart",
     component: <TVChartWidget />,
-    defaultLayout: { i: "chart", x: 0, y: 2, w: 6, h: 6 },
+    defaultLayout: { i: "chart", x: 0, y: 2, w: 6, h: 10, minH: 6, minW: 4 },
     visible: true,
   },
   {
@@ -52,7 +55,7 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
     key: "chat",
     name: "Chat",
     component: <ChatWidget />,
-    defaultLayout: { i: "chat", x: 6, y: 4, w: 2, h: 3 },
+    defaultLayout: { i: "chat", x: 6, y: 4, w: 2, h: 6, minH: 6, minW: 2 },
     visible: true,
   },
   {
@@ -70,6 +73,13 @@ export default function DashboardLayout() {
   const layout = widgets
     .filter((w) => w.visible)
     .map((w) => ({ ...w.defaultLayout, i: w.key }));
+
+  // Prepare layouts for responsive breakpoints
+  const layouts = {
+    lg: layout,
+    md: layout,
+    sm: layout,
+  };
 
   // Persist layout/visibility in localStorage
   useEffect(() => {
@@ -101,37 +111,53 @@ export default function DashboardLayout() {
   };
 
   return (
-    <div>
+    <Box>
       {/* Controls */}
-      <div style={{ marginBottom: 16 }}>
+      <Stack direction="row" spacing={1} mb={2}>
         {widgets.map((w) => (
-          <button
+          <Button
             key={w.key}
+            variant="outlined"
+            size="small"
             onClick={() => toggleWidget(w.key)}
-            style={{ marginRight: 8 }}
           >
             {w.visible ? "Ocultar" : "Mostrar"} {w.name}
-          </button>
+          </Button>
         ))}
-      </div>
-      <GridLayout
+      </Stack>
+      <ResponsiveGridLayout
         className="layout"
-        layout={layout}
-        cols={12}
+        layouts={layouts}
+        breakpoints={{ lg: 1200, md: 996, sm: 768 }}
+        cols={{ lg: 12, md: 10, sm: 6 }}
         rowHeight={30}
-        width={1200}
-        isDraggable={true}
-        isResizable={true}
+        isDraggable
+        isResizable
+        resizeHandles={["s","w","e","n","sw","nw","se","ne"]}
+        margin={[8, 8]}
+        draggableHandle=".widget-drag-handle"
+        draggableCancel="input,textarea,button,select,option,.no-drag"
       >
         {widgets
           .filter((w) => w.visible)
           .map((w) => (
-            <div key={w.key} style={{ border: "1px solid #ddd", padding: 8 }}>
-              <h4>{w.name}</h4>
+            <Paper
+              key={w.key}
+              elevation={3}
+              sx={{
+                p: 1,
+                height: "100%",
+                boxSizing: "border-box",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+              }}
+            >
+              <h4 className="widget-drag-handle" style={{ cursor: "move" }}>{w.name}</h4>
               {w.component}
-            </div>
+            </Paper>
           ))}
-      </GridLayout>
-    </div>
+      </ResponsiveGridLayout>
+    </Box>
   );
 }
