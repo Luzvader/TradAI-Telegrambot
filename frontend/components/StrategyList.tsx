@@ -31,7 +31,7 @@ export default function StrategyList() {
       {data.strategies.map((s, idx) => (
         <ListItem key={idx} divider>
           <ListItemText
-            primary={s.name ?? s.id}
+            primary={String(s.name ?? s.id)}
             secondary={s.symbol ? `Symbol: ${s.symbol}` : "Rule-based"}
           />
         </ListItem>

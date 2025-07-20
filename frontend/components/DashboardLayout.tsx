@@ -76,8 +76,13 @@ export default function DashboardLayout() {
     const saved = localStorage.getItem("dashboard-widgets");
     if (saved) {
       try {
-        const parsed: WidgetConfig[] = JSON.parse(saved);
-        setWidgets(parsed);
+        const parsed: { key: string; visible: boolean }[] = JSON.parse(saved);
+        setWidgets((prev) =>
+          prev.map((w) => {
+            const found = parsed.find((p) => p.key === w.key);
+            return found ? { ...w, visible: found.visible } : w;
+          })
+        );
       } catch (e) {
         console.error("Failed to parse widgets", e);
       }
@@ -85,7 +90,8 @@ export default function DashboardLayout() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("dashboard-widgets", JSON.stringify(widgets));
+    const compact = widgets.map(({ key, visible }) => ({ key, visible }));
+    localStorage.setItem("dashboard-widgets", JSON.stringify(compact));
   }, [widgets]);
 
   const toggleWidget = (key: string) => {
