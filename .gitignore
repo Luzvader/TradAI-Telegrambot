@@ -209,7 +209,7 @@ options.xml
 
 # Node dependencies (frontend)
 /frontend/node_modules/
-.node_modules/
+node_modules/
 
 # Next.js build outputs (frontend)
 /frontend/.next/
