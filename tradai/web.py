@@ -26,6 +26,7 @@ from .services.market_service import (
     fetch_with_indicators,
     DEFAULT_SYMBOLS,
 )
+from .strategy import save_strategy as save_rule_strategy
 from .llm_agent import suggest_strategy
 from .wallet import (
     load_wallet_config,

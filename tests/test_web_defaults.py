@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
-from tradai.web import app, DEFAULT_SYMBOLS, TradingViewClient
-from tradai.tradingview import columns_for_timeframe
+from tradai.web import app, DEFAULT_SYMBOLS
+from tradai.tradingview import TradingViewClient, columns_for_timeframe
 
 
 def test_monitor_defaults(monkeypatch):
