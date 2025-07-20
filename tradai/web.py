@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import List
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.staticfiles import StaticFiles
+
 import threading
 import json
 
@@ -226,17 +226,5 @@ def stop_bot():
 @app.get("/orders")
 def get_orders():
     return svc_list_orders()
-
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-WEBAPP_DIR = ROOT_DIR / "webapp"
-
-if WEBAPP_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(WEBAPP_DIR), html=True), name="static")
-else:
-
-    @app.get("/")
-    def _index_missing():  # pragma: no cover
-        raise HTTPException(status_code=404, detail="Frontend no encontrado")
 
 __all__ = ["app", "DEFAULT_SYMBOLS", "TradingViewClient"]

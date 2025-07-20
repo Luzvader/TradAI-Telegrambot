@@ -20,6 +20,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import List
+import time
 
 ROOT = Path(__file__).resolve().parent
 FRONTEND_DIR = ROOT / "frontend"
@@ -32,28 +33,24 @@ npm_exe = "npm.cmd" if os.name == "nt" else "npm"
 CERT_DIR = Path.home() / ".tradai_ssl"
 CERT_FILE = CERT_DIR / "cert.pem"
 KEY_FILE = CERT_DIR / "key.pem"
-# Build command that starts Next.js in HTTPS mode with same cert
-FRONTEND_CMD: List[str] = [
-    npm_exe,
-    "exec",
-    "--",
-    "next",
-    "dev",
-    "--https",
-    "--ssl-cert",
-    str(CERT_FILE),
-    "--ssl-key",
-    str(KEY_FILE),
-]
+# Command to start Next.js dev server; HTTPS enabled via env vars set below
+FRONTEND_CMD: List[str] = [npm_exe, "run", "dev:https"]
 
 backend_proc = None  # type: subprocess.Popen | None
 frontend_proc = None  # type: subprocess.Popen | None
 
 
-def start_process(cmd: List[str], cwd: Path | None = None) -> subprocess.Popen:  # noqa: D401
+def start_process(cmd: List[str], cwd: Path | None = None, https_env: bool = False) -> subprocess.Popen:  # noqa: D401
     """Start *cmd* in *cwd* returning the Popen instance (stdout/stderr inherited)."""
 
-    return subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE)
+    env = os.environ.copy()
+    if https_env:
+        env.update({
+            "HTTPS": "true",
+            "SSL_CRT_FILE": str(CERT_FILE),
+            "SSL_KEY_FILE": str(KEY_FILE),
+        })
+    return subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.PIPE)
 
 
 def stop_process(proc: subprocess.Popen | None) -> None:
@@ -73,7 +70,7 @@ def main() -> None:  # noqa: D401
     backend_proc = start_process(BACKEND_CMD)
 
     print("Starting TradAI frontend (Next.js)...")
-    frontend_proc = start_process(FRONTEND_CMD, cwd=FRONTEND_DIR)
+    frontend_proc = start_process(FRONTEND_CMD, cwd=FRONTEND_DIR, https_env=True)
 
     def _signal_handler(signum, frame):  # noqa: D401
         print("\nStopping servers... (signal", signum, ")")
@@ -97,8 +94,8 @@ def main() -> None:  # noqa: D401
                 print("Frontend exited, shutting down backend.")
                 stop_process(backend_proc)
                 sys.exit(frontend_proc.returncode)
-            # Sleep without importing time to keep it lightweight
-            signal.pause()
+            # Sleep a bit to avoid busy-waiting (signal.pause not on Windows)
+            time.sleep(1)
     except KeyboardInterrupt:
         _signal_handler(signal.SIGINT, None)
 
