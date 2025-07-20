@@ -57,7 +57,14 @@ export default function DashboardLayout() {
         {widgets
           .filter((w) => w.visible)
           .map((w) => (
-            <Grid key={w.key} item xs={12} md={w.cols} lg={w.cols}>
+            <Grid
+              key={w.key}
+              item
+              xs={12}
+              md={w.cols}
+              lg={w.cols}
+              sx={w.height ? { height: w.height } : undefined}
+            >
               <WidgetFrame title={w.name}>{w.component}</WidgetFrame>
             </Grid>
           ))}

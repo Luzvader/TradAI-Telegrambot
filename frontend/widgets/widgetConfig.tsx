@@ -11,6 +11,8 @@ export interface WidgetConfig {
   name: string;
   component: ReactNode;
   cols: number;
+  /** Optional fixed height for the widget (px) */
+  height?: number;
   visible: boolean;
 }
 
@@ -27,13 +29,6 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     name: "Prices",
     component: <PricesWidget />,
     cols: 3,
-    visible: true,
-  },
-  {
-    key: "chart",
-    name: "Market Chart",
-    component: <TVChartWidget />,
-    cols: 12,
     visible: true,
   },
   {
@@ -55,6 +50,13 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     name: "PnL",
     component: <PnlWidget />,
     cols: 2,
+  },
+  {
+    key: "chart",
+    name: "Market Chart",
+    component: <TVChartWidget />,
+    cols: 12,
+    height: 500,
     visible: true,
   },
 ];
