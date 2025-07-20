@@ -15,32 +15,85 @@ interface WidgetSize {
 interface WidgetLayout {
   id: string;
   title: string;
-  defaultSize: WidgetSize;
   content: React.ReactNode;
+  defaultSize: WidgetSize;
+}
+
+interface WidgetProps extends Omit<WidgetLayout, 'content'> {
+  content: React.ReactNode;
+  onResize: (e: React.SyntheticEvent, data: ResizeCallbackData) => void;
+  onResizeStart: () => void;
+  onResizeStop: (e: React.SyntheticEvent, data: ResizeCallbackData) => void;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
+  isDraggingOver: boolean;
+  isResizing: boolean;
 }
 
 // Widget Component
-const Widget = React.memo(({ 
-  id, 
-  title, 
-  content, 
+const Widget: React.FC<WidgetProps> = React.memo(({
+  id,
+  title,
+  content,
   defaultSize,
   onResize,
+  onResizeStart,
   onResizeStop,
   onDragStart,
   onDragOver,
   onDrop,
   isDraggingOver,
-  isResizing
-}: WidgetLayout & {
-  onResize: (e: React.SyntheticEvent, data: ResizeCallbackData) => void;
-  onResizeStop: (e: React.SyntheticEvent, data: ResizeCallbackData) => void;
-  onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
-  onDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
-  onDrop: (e: React.DragEvent<HTMLDivElement>) => void;
-  isDraggingOver: boolean;
-  isResizing: boolean;
+  isResizing,
 }) => {
+  const [isDragging, setIsDragging] = useState(false);
+  const [size, setSize] = useState({
+    width: defaultSize.w * 100,
+    height: defaultSize.h * 150,
+  });
+
+  // Update size when defaultSize changes
+  useEffect(() => {
+    setSize({
+      width: Math.max(100, defaultSize.w * 100),
+      height: Math.max(150, defaultSize.h * 150),
+    });
+  }, [defaultSize]);
+
+  // Handle drag start
+  const handleDragStart = (e: React.DragEvent) => {
+    if (isResizing) return;
+    e.dataTransfer.setData('text/plain', id);
+    setIsDragging(true);
+    onDragStart(e);
+  };
+
+  // Handle drag end
+  const handleDragEnd = () => {
+    setIsDragging(false);
+    document.body.style.cursor = 'default';
+  };
+
+  // Handle drag over
+  const handleDragOver = (e: React.DragEvent) => {
+    if (isResizing) return;
+    e.preventDefault();
+    onDragOver(e);
+  };
+
+  // Handle drop
+  const handleDrop = (e: React.DragEvent) => {
+    if (isResizing) return;
+    e.preventDefault();
+    onDrop(e);
+  };
+
+  // Handle resize
+  const handleResize = (e: React.SyntheticEvent, data: ResizeCallbackData) => {
+    setSize(data.size);
+    onResize(e, data);
+  };
+
   const widgetStyles: SxProps<Theme> = {
     bgcolor: 'background.paper',
     border: '1px solid',
@@ -60,37 +113,51 @@ const Widget = React.memo(({
     '&:active': { cursor: 'grabbing' },
     '&:hover': {
       boxShadow: 3,
-      '& .resize-handle': { opacity: 1 }
+      '& .resize-handle-bottom, & .resize-handle-corner': { opacity: 1 }
     },
-    '& .resize-handle': {
+    '& .resize-handle-bottom, & .resize-handle-corner': {
       position: 'absolute',
+      opacity: 0,
+      transition: 'opacity 0.2s',
+    },
+    '& .resize-handle-bottom': {
+      left: 0,
+      right: 20, // Don't overlap with corner handle
+      bottom: 0,
+      height: 10,
+      cursor: 's-resize',
+      '&:hover': {
+        background: 'linear-gradient(0deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0) 100%)',
+      },
+    },
+    '& .resize-handle-corner': {
       bottom: 0,
       right: 0,
       width: 20,
       height: 20,
       background: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'20\' height=\'20\' viewBox=\'0 0 20 20\'%3E%3Cpath fill=\'%23999\' d=\'M14 14v2h2v-2h-2zm-4 0v2h2v-2h-2zm-4 0v2h2v-2H6zm8-4v2h2v-2h-2zm-4 0v2h2v-2h-2zm-4 0v2h2v-2H6z\'/%3E%3C/svg%3E") no-repeat bottom right',
       cursor: 'se-resize',
-      opacity: 0,
-      transition: 'opacity 0.2s',
     }
   };
 
   return (
     <Resizable
-      width={defaultSize.w * 100}
-      height={defaultSize.h * 150}
-      onResize={onResize}
+      width={size.width}
+      height={size.height}
+      onResize={handleResize}
+      onResizeStart={onResizeStart}
       onResizeStop={onResizeStop}
-      resizeHandles={['se']}
       minConstraints={[100, 150]}
       maxConstraints={[1200, 900]}
+      resizeHandles={['s', 'se']}
     >
       <Box
         sx={widgetStyles}
         draggable={!isResizing}
-        onDragStart={onDragStart}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
         data-widget-id={id}
       >
         <Box 
@@ -115,7 +182,8 @@ const Widget = React.memo(({
         <Box sx={{ flex: 1, overflow: 'auto' }}>
           {content}
         </Box>
-        <div className="resize-handle" />
+        <div className="resize-handle-bottom" />
+      <div className="resize-handle-corner" />
       </Box>
     </Resizable>
   );
@@ -129,6 +197,7 @@ const Dashboard = () => {
   const [widgets, setWidgets] = useState<WidgetLayout[]>([]);
   const [isResizing, setIsResizing] = useState(false);
   const [draggedWidgetId, setDraggedWidgetId] = useState<string | null>(null);
+  const [widgetSizes, setWidgetSizes] = useState<Record<string, { width: number; height: number }>>({});
 
   // Initialize widgets
   useEffect(() => {
@@ -177,10 +246,27 @@ const Dashboard = () => {
       },
     ];
 
+    // Initialize widget sizes based on default sizes
+    const initialSizes = initialWidgets.reduce((acc, widget) => ({
+      ...acc,
+      [widget.id]: { 
+        width: widget.defaultSize.w * 100,
+        height: widget.defaultSize.h * 150
+      }
+    }), {});
+
+    setWidgetSizes(initialSizes);
     setWidgets(initialWidgets);
   }, []);
 
   // Event Handlers
+  const handleResize = useCallback((widgetId: string, _: React.SyntheticEvent, { size }: ResizeCallbackData) => {
+    setWidgetSizes(prevSizes => ({
+      ...prevSizes,
+      [widgetId]: size
+    }));
+  }, []);
+
   const handleResizeStart = useCallback(() => {
     setIsResizing(true);
   }, []);
@@ -189,19 +275,33 @@ const Dashboard = () => {
     (e: React.SyntheticEvent, data: ResizeCallbackData) => {
       setIsResizing(false);
       
+      // Calculate grid units from pixel sizes
+      const gridCols = Math.max(1, Math.min(12, Math.round(data.size.width / 100)));
+      const gridRows = Math.max(1, Math.min(12, Math.round(data.size.height / 150)));
+      
+      // Update both the widget sizes and the grid layout
       setWidgets(prevWidgets => 
         prevWidgets.map(widget => 
           widget.id === widgetId 
             ? { 
                 ...widget, 
                 defaultSize: { 
-                  w: Math.max(1, Math.min(12, Math.round(data.size.width / 100))),
-                  h: Math.max(1, Math.min(12, Math.round(data.size.height / 150)))
+                  w: gridCols,
+                  h: gridRows
                 } 
               } 
             : widget
         )
       );
+      
+      // Update the widget sizes for smooth resizing
+      setWidgetSizes(prevSizes => ({
+        ...prevSizes,
+        [widgetId]: {
+          width: gridCols * 100,
+          height: gridRows * 150
+        }
+      }));
     },
     []
   );
@@ -270,27 +370,39 @@ const Dashboard = () => {
           minHeight: '80vh',
         }}
       >
-        {widgets.map((widget) => (
-          <Box
-            key={widget.id}
-            sx={{
-              gridColumn: `span ${Math.min(12, widget.defaultSize.w)}`,
-              gridRow: 'span 1',
-              minHeight: '150px',
-            }}
-          >
-            <Widget
-              {...widget}
-              onResize={handleResizeStart}
-              onResizeStop={handleResizeStop(widget.id)}
-              onDragStart={(e) => handleDragStart(e, widget.id)}
-              onDragOver={(e) => handleDragOver(e, widget.id)}
-              onDrop={(e) => handleDrop(e, widget.id)}
-              isDraggingOver={draggedWidgetId === widget.id}
-              isResizing={isResizing}
-            />
-          </Box>
-        ))}
+        {widgets.map((widget) => {
+          const size = widgetSizes[widget.id] || {
+            width: widget.defaultSize.w * 100,
+            height: widget.defaultSize.h * 150
+          };
+          
+          return (
+            <Box
+              key={widget.id}
+              sx={{
+                gridColumn: `span ${Math.min(12, widget.defaultSize.w)}`,
+                gridRow: `span ${widget.defaultSize.h}`,
+                minHeight: `${widget.defaultSize.h * 50}px`,
+              }}
+            >
+              <Widget
+                {...widget}
+                defaultSize={{
+                  w: size.width / 100,
+                  h: size.height / 150
+                }}
+                onResize={(e, data) => handleResize(widget.id, e, data)}
+                onResizeStart={handleResizeStart}
+                onResizeStop={handleResizeStop(widget.id)}
+                onDragStart={(e) => handleDragStart(e, widget.id)}
+                onDragOver={(e) => handleDragOver(e, widget.id)}
+                onDrop={(e) => handleDrop(e, widget.id)}
+                isDraggingOver={draggedWidgetId === widget.id}
+                isResizing={isResizing}
+              />
+            </Box>
+          );
+        })}
       </Box>
     </Container>
   );
