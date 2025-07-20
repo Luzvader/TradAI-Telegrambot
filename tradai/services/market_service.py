@@ -49,8 +49,4 @@ def fetch_with_indicators(symbols: Sequence[str] | None, timeframe: str):
     if symbols is None:
         symbols = DEFAULT_SYMBOLS
     cols = columns_for_timeframe(timeframe)
-    raw = _client.fetch_markets(list(symbols), columns=cols)
-    cleaned = {
-        key.split(":")[1].removesuffix("USDT"): val for key, val in raw.items()
-    }
-    return cleaned
+    return _client.fetch_markets(list(symbols), columns=cols)
