@@ -21,8 +21,7 @@ export default function BalanceWidget() {
     <Box sx={{ 
       display: "flex", 
       flexDirection: "column", 
-      gap: 2, 
-      minHeight: 400,
+      gap: 2,
       p: 2,
       '& .MuiAutocomplete-root': {
         width: '100%',
