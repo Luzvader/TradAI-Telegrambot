@@ -5,7 +5,7 @@ import json
 import threading
 from dataclasses import asdict
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Dict, List, Sequence, Union
 
 from ..bot_engine import BotEngine, ORDERS_FILE
 from ..strategies import Strategy, load_strategies, save_strategy as save_ema_strategy
@@ -57,11 +57,14 @@ def stop_engine() -> str:
 # Strategy helpers
 # ---------------------------------------------------------------------------
 
-def list_strategies() -> List[dict]:
+def list_strategies() -> List[Union[dict, str]]:
+    """Return EMA strategies (as dicts) plus rule-based strategy IDs."""
+    result: List[Union[dict, str]] = []
     loaded = load_strategies()
     if loaded:
-        return [asdict(s) for s in loaded.values()]
-    return list_rule_strategies()
+        result.extend(asdict(s) for s in loaded.values())
+    result.extend(list_rule_strategies())
+    return result
 
 def get_strategy(strategy_id: str):
     return load_rule_strategy(strategy_id)
