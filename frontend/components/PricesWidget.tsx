@@ -21,7 +21,8 @@ export default function PricesWidget() {
       const res = await fetcher<{ data: Record<string, any> }>(
         `/api/markets?symbols=${sym}`
       );
-      if (res.data && res.data[sym]) {
+      const base = sym.replace(/USDT$/, "");
+      if (res.data && res.data[base]) {
         setSymbols([...symbols, sym]);
         setError(null);
       } else {
