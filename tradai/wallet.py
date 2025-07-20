@@ -102,12 +102,10 @@ def wallet_from_config(cfg: Dict) -> Wallet:
 _wallet_cache: Wallet | None = None
 
 
-def load_wallet() -> Wallet | None:
-    """Devuelve la instancia de :class:`Wallet` configurada o ``None``."""
+def load_wallet() -> Wallet:
+    """Devuelve la instancia de :class:`Wallet` configurada o una demo por defecto."""
     global _wallet_cache
-    cfg = load_wallet_config()
-    if not cfg:
-        return None
+    cfg = load_wallet_config() or {"type": "demo"}
     if _wallet_cache and getattr(_wallet_cache, "_cfg", None) == cfg:
         return _wallet_cache
     wallet = wallet_from_config(cfg)
