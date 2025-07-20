@@ -27,7 +27,7 @@ const DEFAULT_WIDGETS: WidgetConfig[] = [
     key: "balance",
     name: "Balance",
     component: <BalanceWidget />,
-    defaultLayout: { i: "balance", x: 0, y: 0, w: 3, h: 2 },
+    defaultLayout: { i: "balance", x: 0, y: 0, w: 3, h: 4, minH: 4, minW: 3 },
     visible: true,
   },
   {

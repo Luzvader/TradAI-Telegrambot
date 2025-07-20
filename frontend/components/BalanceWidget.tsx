@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "../utils/fetcher";
-import { Box, Autocomplete, TextField, Typography } from "@mui/material";
+import { Box, Typography } from "@mui/material";
 
 interface WalletResponse {
   type: string | null;
@@ -12,7 +11,6 @@ interface WalletResponse {
 
 export default function BalanceWidget() {
   const [selected, setSelected] = useState<string>("demo");
-
   const { data, error, isLoading } = useSWR<WalletResponse>("/api/wallet", fetcher);
 
   const balance = data?.balances?.USDT ?? 0;
