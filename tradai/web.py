@@ -19,6 +19,8 @@ from fastapi.staticfiles import StaticFiles
 import threading
 import json
 
+from .tradingview import TradingViewClient
+
 from .services.market_service import (
     fetch_basic,
     fetch_with_indicators,
@@ -38,10 +40,10 @@ from .services.strategy_service import (
     get_strategy as svc_get_strategy,
     delete_strategy as svc_delete_strategy,
     save_strategy as svc_save_strategy,
-    start_engine as svc_start_engine,
-    stop_engine as svc_stop_engine,
     list_orders as svc_list_orders,
 )
+from .bot_engine import BotEngine
+from .strategy import save_strategy as save_rule_strategy
 
 app = FastAPI(title="TradAI Web API")
 
@@ -195,14 +197,29 @@ def llm_strategy_route(payload: dict = Body(...)):
 
 @app.post("/bot/start")
 def start_bot():
-    status = svc_start_engine()
-    return {"status": status}
+    """Start the BotEngine in the background."""
+    global _bot_thread, _bot_stop
+    if _bot_thread and _bot_thread.is_alive():
+        return {"status": "running"}
+    engine = BotEngine(DEFAULT_SYMBOLS)
+    _bot_stop.clear()
+    _bot_thread = threading.Thread(
+        target=engine.run_forever, kwargs={"stop_event": _bot_stop}, daemon=True
+    )
+    _bot_thread.start()
+    return {"status": "started"}
 
 
 @app.post("/bot/stop")
 def stop_bot():
-    status = svc_stop_engine()
-    return {"status": status}
+    """Stop the running BotEngine if active."""
+    global _bot_thread, _bot_stop
+    if _bot_thread and _bot_thread.is_alive():
+        _bot_stop.set()
+        _bot_thread.join(timeout=0.1)
+        _bot_thread = None
+        return {"status": "stopped"}
+    return {"status": "not_running"}
 
 
 @app.get("/orders")
@@ -220,3 +237,5 @@ else:
     @app.get("/")
     def _index_missing():  # pragma: no cover
         raise HTTPException(status_code=404, detail="Frontend no encontrado")
+
+__all__ = ["app", "DEFAULT_SYMBOLS", "TradingViewClient"]
