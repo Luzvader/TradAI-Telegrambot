@@ -91,6 +91,8 @@ El proxy del `next.config.js` reenvía las peticiones `/api/*` al backend.
 | POST   | /bot/start | Iniciar motor de estrategias |
 | POST   | /bot/stop  | Detener motor |
 | GET    | /orders    | Historial de órdenes |
+| GET    | /pnl       | Devuelve la ganancia/perdida acumulada |
+| POST   | /chat      | Enviar un mensaje al bot (echo simple) |
 
 Consulta Swagger para parámetros detallados y ejemplos.
 
