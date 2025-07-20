@@ -10,13 +10,10 @@ directorio ``webapp`` en la raíz del proyecto.
 
 from __future__ import annotations
 
-from dataclasses import asdict
-from pathlib import Path
 from typing import List
 
 from fastapi import Body, FastAPI, HTTPException, Query
 
-import json
 
 from .tradingview import TradingViewClient
 
@@ -30,7 +27,6 @@ from .llm_agent import suggest_strategy
 from .wallet import (
     load_wallet_config,
     save_wallet_config,
-    wallet_from_config,
     BinanceWallet,
     load_wallet,
 )
@@ -45,8 +41,6 @@ from .services.strategy_service import (
     list_orders as svc_list_orders,
 )
 from .services.pnl_service import calculate_pnl as svc_calculate_pnl
-from .bot_engine import BotEngine
-from .strategy import save_strategy as save_rule_strategy
 
 app = FastAPI(title="TradAI Web API")
 
