@@ -16,7 +16,6 @@ from typing import List
 
 from fastapi import Body, FastAPI, HTTPException, Query
 
-import threading
 import json
 
 from .tradingview import TradingViewClient
@@ -37,6 +36,8 @@ from .wallet import (
 )
 from .options import load_options, save_options
 from .services.strategy_service import (
+    start_engine as svc_start_engine,
+    stop_engine as svc_stop_engine,
     list_strategies as svc_list_strategies,
     get_strategy as svc_get_strategy,
     delete_strategy as svc_delete_strategy,
@@ -50,9 +51,6 @@ app = FastAPI(title="TradAI Web API")
 
 # DEFAULT_SYMBOLS imported from market_service
 
-# Execution engine globals
-_bot_thread: threading.Thread | None = None
-_bot_stop = threading.Event()
 
 
 @app.get("/markets")
@@ -116,13 +114,11 @@ def set_wallet(payload: dict = Body(...)):
 def get_wallet():
     """Devuelve la configuración y balances de la cartera actual."""
     wallet = load_wallet()
-    if not wallet:
-        return {"type": None, "balances": {}}
     try:
         balances = wallet.get_balances()
     except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=400, detail=str(exc))
-    cfg = load_wallet_config() or {}
+    cfg = load_wallet_config() or {"type": "demo"}
     return {"type": cfg.get("type"), "balances": balances}
 
 
@@ -199,28 +195,15 @@ def llm_strategy_route(payload: dict = Body(...)):
 @app.post("/bot/start")
 def start_bot():
     """Start the BotEngine in the background."""
-    global _bot_thread, _bot_stop
-    if _bot_thread and _bot_thread.is_alive():
-        return {"status": "running"}
-    engine = BotEngine(DEFAULT_SYMBOLS)
-    _bot_stop.clear()
-    _bot_thread = threading.Thread(
-        target=engine.run_forever, kwargs={"stop_event": _bot_stop}, daemon=True
-    )
-    _bot_thread.start()
-    return {"status": "started"}
+    status = svc_start_engine(DEFAULT_SYMBOLS)
+    return {"status": status}
 
 
 @app.post("/bot/stop")
 def stop_bot():
     """Stop the running BotEngine if active."""
-    global _bot_thread, _bot_stop
-    if _bot_thread and _bot_thread.is_alive():
-        _bot_stop.set()
-        _bot_thread.join(timeout=0.1)
-        _bot_thread = None
-        return {"status": "stopped"}
-    return {"status": "not_running"}
+    status = svc_stop_engine()
+    return {"status": status}
 
 
 @app.get("/orders")
