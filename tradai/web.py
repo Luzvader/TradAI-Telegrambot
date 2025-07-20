@@ -33,14 +33,15 @@ from .wallet import (
     load_wallet,
 )
 from .options import load_options, save_options
-from .strategies import Strategy, load_strategies, save_strategy as save_ema_strategy
-from .strategy import (
-    save_strategy as save_rule_strategy,
-    list_strategies as list_rule_strategies,
-    load_strategy as load_rule_strategy,
-    delete_strategy as delete_rule_strategy,
+from .services.strategy_service import (
+    list_strategies as svc_list_strategies,
+    get_strategy as svc_get_strategy,
+    delete_strategy as svc_delete_strategy,
+    save_strategy as svc_save_strategy,
+    start_engine as svc_start_engine,
+    stop_engine as svc_stop_engine,
+    list_orders as svc_list_orders,
 )
-from .bot_engine import BotEngine, ORDERS_FILE
 
 app = FastAPI(title="TradAI Web API")
 
@@ -140,46 +141,22 @@ def get_options():
 
 @app.post("/strategies")
 def create_strategy(payload: dict = Body(...)):
-    """Guarda una estrategia."""
-    if payload.get("symbol"):
-        # Estrategia basada en EMAs
-        name = payload.get("name")
-        symbol = payload.get("symbol")
-        if not name or not symbol:
-            raise HTTPException(status_code=400, detail="name y symbol requeridos")
-        strat = Strategy(
-            name=name,
-            symbol=symbol,
-            ema_short=int(payload.get("ema_short", 20)),
-            ema_long=int(payload.get("ema_long", 50)),
-        )
-        try:
-            save_ema_strategy(strat)
-        except Exception as exc:  # pragma: no cover - disk error
-            raise HTTPException(status_code=500, detail=str(exc))
-        return {"status": "ok"}
-
-    # Estrategia basada en reglas simples
+    """Guarda una estrategia (EMA o rule-based) via service layer."""
     try:
-        sid = save_rule_strategy(payload)
-    except Exception as exc:  # pragma: no cover - error inesperado
+        return svc_save_strategy(payload)
+    except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=500, detail=str(exc))
-    return {"id": sid}
 
 
 @app.get("/strategies")
 def get_strategies():
     """Lista estrategias guardadas."""
-    loaded = load_strategies()
-    if loaded:
-        return {"strategies": [asdict(s) for s in loaded.values()]}
-    return {"strategies": list_rule_strategies()}
+    return {"strategies": svc_list_strategies()}
 
 
 @app.get("/strategies/{strategy_id}")
 def get_strategy(strategy_id: str):
-    """Devuelve los datos de la estrategia identificada por ``strategy_id``."""
-    data = load_rule_strategy(strategy_id)
+    data = svc_get_strategy(strategy_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Strategy not found")
     return {"id": strategy_id, "strategy": data}
@@ -187,8 +164,7 @@ def get_strategy(strategy_id: str):
 
 @app.delete("/strategies/{strategy_id}")
 def delete_strategy_route(strategy_id: str):
-    """Elimina la estrategia indicada."""
-    deleted = delete_rule_strategy(strategy_id)
+    deleted = svc_delete_strategy(strategy_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Strategy not found")
     return {"status": "deleted"}
@@ -219,40 +195,19 @@ def llm_strategy_route(payload: dict = Body(...)):
 
 @app.post("/bot/start")
 def start_bot():
-    """Inicia el motor de estrategias en segundo plano."""
-    global _bot_thread, _bot_stop
-    if _bot_thread and _bot_thread.is_alive():
-        return {"status": "running"}
-    engine = BotEngine(DEFAULT_SYMBOLS)
-    _bot_stop.clear()
-    _bot_thread = threading.Thread(
-        target=engine.run_forever, kwargs={"stop_event": _bot_stop}, daemon=True
-    )
-    _bot_thread.start()
-    return {"status": "started"}
+    status = svc_start_engine()
+    return {"status": status}
 
 
 @app.post("/bot/stop")
 def stop_bot():
-    """Detiene la ejecución del motor de estrategias."""
-    global _bot_thread, _bot_stop
-    if _bot_thread and _bot_thread.is_alive():
-        _bot_stop.set()
-        _bot_thread.join(timeout=0.1)
-        _bot_thread = None
-        return {"status": "stopped"}
-    return {"status": "not_running"}
+    status = svc_stop_engine()
+    return {"status": status}
 
 
 @app.get("/orders")
 def get_orders():
-    """Devuelve el historial de órdenes ejecutadas."""
-    if not ORDERS_FILE.exists():
-        return []
-    try:
-        return json.loads(ORDERS_FILE.read_text())
-    except Exception:  # pragma: no cover - corrupted file
-        return []
+    return svc_list_orders()
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
