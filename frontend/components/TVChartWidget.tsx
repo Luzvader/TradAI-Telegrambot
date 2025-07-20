@@ -35,6 +35,9 @@ export default function TVChartWidget() {
         <iframe
           src={src}
           style={{ width: "100%", height: "100%", border: "none" }}
+          loading="lazy"
+          sandbox="allow-scripts allow-same-origin"
+          referrerPolicy="no-referrer"
         />
       </Box>
     </Box>
