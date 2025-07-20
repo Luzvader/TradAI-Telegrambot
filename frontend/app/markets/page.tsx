@@ -6,7 +6,7 @@ export default function MarketsPage() {
   return (
     <div>
       <h2>Markets</h2>
-      <MarketsTable symbols={symbols} />
+      <MarketsTable symbols={symbols} period="24h" />
     </div>
   );
 }
