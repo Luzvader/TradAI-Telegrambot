@@ -31,10 +31,8 @@ def suggest_strategy(user_prompt: str) -> dict:
         valid JSON.
     """
 
-    api_key = load_options().get(OPENAI_OPTION_KEY)
-    if not api_key:
-        opts = load_options() or {}
-        api_key = opts.get("openai_key")
+    opts = load_options() or {}
+    api_key = opts.get(OPENAI_OPTION_KEY) or opts.get("openai_key")
     if not api_key:
         raise RuntimeError("OpenAI API key not configured")
 
