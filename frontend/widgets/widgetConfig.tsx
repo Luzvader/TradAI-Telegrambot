@@ -50,7 +50,6 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     name: "PnL",
     component: <PnlWidget />,
     cols: 2,
-    visible: true,
   },
   {
     key: "chart",
