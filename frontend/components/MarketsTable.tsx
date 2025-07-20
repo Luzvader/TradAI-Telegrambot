@@ -1,5 +1,5 @@
 "use client";
-import { DataGrid, GridColDef, GridRowsProp } from "@mui/x-data-grid";
+import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import { Sparklines, SparklinesLine } from "react-sparklines";
 import useSWR from "swr";
 import { fetcher } from "../utils/fetcher";
