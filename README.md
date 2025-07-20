@@ -42,7 +42,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # 3) Frontend – dependencias npm
-yarn install         # o npm install
+npm install
 ```
 
 ---
