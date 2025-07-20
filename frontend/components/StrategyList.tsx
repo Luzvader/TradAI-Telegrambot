@@ -15,7 +15,7 @@ interface Strategy {
   id?: string;
 }
 interface StratResp {
-  strategies: Strategy[];
+  strategies: (Strategy | string)[];
 }
 
 export default function StrategyList() {
@@ -28,14 +28,17 @@ export default function StrategyList() {
 
   return (
     <List>
-      {data.strategies.map((s, idx) => (
-        <ListItem key={idx} divider>
-          <ListItemText
-            primary={String(s.name ?? s.id)}
-            secondary={s.symbol ? `Symbol: ${s.symbol}` : "Rule-based"}
-          />
-        </ListItem>
-      ))}
+      {data.strategies.map((s, idx) => {
+        const strat = typeof s === "string" ? { id: s } : s;
+        return (
+          <ListItem key={idx} divider>
+            <ListItemText
+              primary={String(strat.name ?? strat.id)}
+              secondary={strat.symbol ? `Symbol: ${strat.symbol}` : "Rule-based"}
+            />
+          </ListItem>
+        );
+      })}
     </List>
   );
 }
