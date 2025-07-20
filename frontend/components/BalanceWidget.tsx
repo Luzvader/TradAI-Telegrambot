@@ -1,5 +1,6 @@
 "use client";
-import React, { useState } from "react";
+import React
+import { useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "../utils/fetcher";
 
