@@ -64,7 +64,7 @@ export default function MarketsTable({ symbols, period }: Props) {
   ];
 
   return (
-    <div style={{ width: "100%", minHeight: 400, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ width: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <Box sx={{ flex: 1, minHeight: 0 }}>
         <DataGrid
           autoHeight
