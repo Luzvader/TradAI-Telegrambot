@@ -39,12 +39,17 @@ export default function RootLayout({
       overflow-x: hidden;
     }
     
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    
     .MuiDataGrid-root {
       min-height: 300px;
     }
     
     .MuiPaper-root {
-      height: 100%;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -62,10 +67,11 @@ export default function RootLayout({
           <NavBar />
           <main style={{ 
             flex: 1,
-            padding: "1rem",
+            padding: "1.5rem 2rem",
             width: '100%',
             maxWidth: '100%',
-            overflow: 'hidden'
+            overflow: 'auto',
+            boxSizing: 'border-box'
           }}>
             {children}
           </main>
