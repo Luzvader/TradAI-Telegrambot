@@ -1,71 +1,15 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
-import { Box, Button, Paper, Stack } from "@mui/material";
-import { WidthProvider, Responsive, Layout } from "react-grid-layout";
-import BalanceWidget from "./BalanceWidget";
-import PricesWidget from "./PricesWidget";
-import TVChartWidget from "./TVChartWidget";
-import StrategiesWidget from "./StrategiesWidget";
-import ChatWidget from "./ChatWidget";
-import PnlWidget from "./PnlWidget";
+import { useEffect, useState } from "react";
+import { Box, Button, Stack } from "@mui/material";
+import { WidthProvider, Responsive } from "react-grid-layout";
+import WidgetFrame from "./WidgetFrame";
+import { DEFAULT_WIDGETS, WidgetConfig } from "../widgets/widgetConfig";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
-interface WidgetConfig {
-  key: string;
-  name: string;
-  component: ReactNode;
-  defaultLayout: Layout;
-  visible: boolean;
-}
-
-const DEFAULT_WIDGETS: WidgetConfig[] = [
-  {
-    key: "balance",
-    name: "Balance",
-    component: <BalanceWidget />,
-    defaultLayout: { i: "balance", x: 0, y: 0, w: 3, h: 4, minH: 4, minW: 3 },
-    visible: true,
-  },
-  {
-    key: "prices",
-    name: "Prices",
-    component: <PricesWidget />,
-    defaultLayout: { i: "prices", x: 3, y: 0, w: 3, h: 4 },
-    visible: true,
-  },
-  {
-    key: "chart",
-    name: "Market Chart",
-    component: <TVChartWidget />,
-    defaultLayout: { i: "chart", x: 0, y: 2, w: 6, h: 10, minH: 6, minW: 4 },
-    visible: true,
-  },
-  {
-    key: "strategies",
-    name: "Strategies",
-    component: <StrategiesWidget />,
-    defaultLayout: { i: "strategies", x: 6, y: 0, w: 2, h: 4 },
-    visible: true,
-  },
-  {
-    key: "chat",
-    name: "Chat",
-    component: <ChatWidget />,
-    defaultLayout: { i: "chat", x: 6, y: 4, w: 2, h: 6, minH: 6, minW: 2 },
-    visible: true,
-  },
-  {
-    key: "pnl",
-    name: "PnL",
-    component: <PnlWidget />,
-    defaultLayout: { i: "pnl", x: 0, y: 8, w: 2, h: 2 },
-    visible: true,
-  },
-];
 
 export default function DashboardLayout() {
   const [widgets, setWidgets] = useState<WidgetConfig[]>(DEFAULT_WIDGETS);
@@ -141,21 +85,9 @@ export default function DashboardLayout() {
         {widgets
           .filter((w) => w.visible)
           .map((w) => (
-            <Paper
-              key={w.key}
-              elevation={3}
-              sx={{
-                p: 1,
-                height: "100%",
-                boxSizing: "border-box",
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-              }}
-            >
-              <h4 className="widget-drag-handle" style={{ cursor: "move" }}>{w.name}</h4>
+            <WidgetFrame key={w.key} title={w.name}>
               {w.component}
-            </Paper>
+            </WidgetFrame>
           ))}
       </ResponsiveGridLayout>
     </Box>
