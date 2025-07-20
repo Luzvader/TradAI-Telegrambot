@@ -3,8 +3,10 @@ import { readFileSync } from 'fs';
 import { parse } from 'url';
 import next from 'next';
 
-const dev = true;
-const app = next({ dev, hostname: '127.0.0.1', port: 3000 });
+const dev = process.env.NODE_ENV !== 'production';
+const hostname = process.env.HOST || '127.0.0.1';
+const port = parseInt(process.env.PORT, 10) || 3000;
+const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
 const certFile = process.env.SSL_CRT_FILE;
@@ -25,7 +27,7 @@ app.prepare().then(() => {
       const parsedUrl = parse(req.url, true);
       handle(req, res, parsedUrl);
     }
-  ).listen(3000, '127.0.0.1', () => {
-    console.log('> HTTPS Next.js ready on https://127.0.0.1:3000');
+  ).listen(port, hostname, () => {
+    console.log(`> HTTPS Next.js ready on https://${hostname}:${port} (${dev ? 'dev' : 'prod'})`);
   });
 });
