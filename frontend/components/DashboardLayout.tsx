@@ -5,8 +5,6 @@ import { Box, Button, Stack } from "@mui/material";
 import { WidthProvider, Responsive } from "react-grid-layout";
 import WidgetFrame from "./WidgetFrame";
 import { DEFAULT_WIDGETS, WidgetConfig } from "../widgets/widgetConfig";
-import "react-grid-layout/css/styles.css";
-import "react-resizable/css/styles.css";
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
