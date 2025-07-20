@@ -19,7 +19,11 @@ from fastapi.staticfiles import StaticFiles
 import threading
 import json
 
-from .tradingview import TradingViewClient, columns_for_timeframe
+from .services.market_service import (
+    fetch_basic,
+    fetch_with_indicators,
+    DEFAULT_SYMBOLS,
+)
 from .llm_agent import suggest_strategy
 from .wallet import (
     load_wallet_config,
@@ -39,8 +43,8 @@ from .strategy import (
 from .bot_engine import BotEngine, ORDERS_FILE
 
 app = FastAPI(title="TradAI Web API")
-client = TradingViewClient()
-DEFAULT_SYMBOLS = ["BTC", "ETH", "XRP", "SOL", "BNB"]
+
+# DEFAULT_SYMBOLS imported from market_service
 
 # Execution engine globals
 _bot_thread: threading.Thread | None = None
@@ -58,8 +62,8 @@ def get_markets(
     else:
         symbols_list = DEFAULT_SYMBOLS
 
-    markets = client.fetch_markets(symbols_list)
-    return {"symbols": symbols_list, "data": markets}
+    data = fetch_basic(symbols_list)
+    return {"symbols": symbols_list, "data": data}
 
 
 @app.get("/monitor")
@@ -78,8 +82,7 @@ def monitor(
     else:
         symbols_list = DEFAULT_SYMBOLS
 
-    columns = columns_for_timeframe(timeframe)
-    data = client.fetch_markets(symbols_list, columns=columns)
+    data = fetch_with_indicators(symbols_list, timeframe)
     return {"timeframe": timeframe, "data": data}
 
 
