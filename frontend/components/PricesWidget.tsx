@@ -21,14 +21,10 @@ const STORAGE_KEY = 'tradai_prices_widget_symbols';
 
 const PERIODS = [
   { value: "1h", label: "1H" },
-  { value: "3h", label: "3H" },
-  { value: "6h", label: "6H" },
+  { value: "4h", label: "4H" },
   { value: "24h", label: "24H" },
-  { value: "3d", label: "3D" },
   { value: "1w", label: "1W" },
   { value: "1m", label: "1M" },
-  { value: "6m", label: "6M" },
-  { value: "1y", label: "1Y" },
 ];
 
 export default function PricesWidget() {
