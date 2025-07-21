@@ -10,14 +10,10 @@ from typing import List, Sequence
 
 PERIOD_MAP = {
     "1h": "60",
-    "3h": "180",
-    "6h": "360",
+    "4h": "240",
     "24h": None,  # default daily change
-    "3d": "3D",
     "1w": "1W",
     "1m": "1M",
-    "6m": "6M",
-    "1y": "12M",
 }
 
 from ..tradingview import TradingViewClient, columns_for_timeframe
