@@ -1,10 +1,9 @@
 import { ReactNode } from "react";
-import BalanceWidget from "../components/BalanceWidget";
+import BalancePnlWidget from "../components/BalancePnlWidget";
 import PricesWidget from "../components/PricesWidget";
 import TVChartWidget from "../components/TVChartWidget";
 import StrategiesWidget from "../components/StrategiesWidget";
 import ChatWidget from "../components/ChatWidget";
-import PnlWidget from "../components/PnlWidget";
 
 export interface WidgetConfig {
   key: string;
@@ -18,10 +17,10 @@ export interface WidgetConfig {
 
 export const DEFAULT_WIDGETS: WidgetConfig[] = [
   {
-    key: "balance",
-    name: "Balance",
-    component: <BalanceWidget />,
-    cols: 3,
+    key: "balance-pnl",
+    name: "Balance & PnL",
+    component: <BalancePnlWidget />,
+    cols: 4,
     visible: true,
   },
   {
@@ -35,20 +34,13 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     key: "strategies",
     name: "Strategies",
     component: <StrategiesWidget />,
-    cols: 2,
+    cols: 3,
     visible: true,
   },
   {
     key: "chat",
     name: "Chat",
     component: <ChatWidget />,
-    cols: 2,
-    visible: true,
-  },
-  {
-    key: "pnl",
-    name: "PnL",
-    component: <PnlWidget />,
     cols: 2,
     visible: true,
   },
