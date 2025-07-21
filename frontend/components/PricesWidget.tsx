@@ -25,6 +25,10 @@ const PERIODS = [
   { value: "24h", label: "24H" },
   { value: "1w", label: "1W" },
   { value: "1m", label: "1M" },
+  { value: "3m", label: "3M" },
+  { value: "6m", label: "6M" },
+  { value: "1y", label: "1Y" },
+  { value: "ytd", label: "YTD" },
 ];
 
 export default function PricesWidget() {
