@@ -58,12 +58,14 @@ export default function MarketsTable({ symbols, period }: Props) {
 
   const rows = symbols.map((original, idx) => {
     const base = original.replace(/USDT$/, "");
-    const entry = data.data[base] ?? [0, 0, 0];
+    const entry = data.data[base] ?? [0, 0];
     return {
       id: idx,
       symbol: original,
       price: entry[0] || 0,
-      change: entry[2] || 0, // change % is third column (index 2)
+      // The backend returns only price and change %, so the change value is at
+      // index 1.
+      change: entry[1] || 0,
     };
   });
 
