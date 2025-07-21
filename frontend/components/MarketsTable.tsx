@@ -1,20 +1,31 @@
 "use client";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
-import { Sparklines, SparklinesLine } from "react-sparklines";
 import useSWR from "swr";
 import { fetcher } from "../utils/fetcher";
-import { Box, Typography } from "@mui/material";
+import { Box, Typography, Stack, Skeleton } from "@mui/material";
 import React from "react";
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import { format } from 'd3-format';
 
 interface MarketResponse {
   symbols: string[];
-  data: Record<string, number[]>; // Simplified: [price, change, ...]
+  data: Record<string, number[]>; // [price, change, changePercent, ...]
 }
 
 interface Props {
   symbols: string[];
   period: string;
 }
+
+const formatPrice = (value: number) => {
+  if (value >= 1000) {
+    return format(",.0f")(value);
+  } else if (value >= 0.1) {
+    return format(",.2f")(value);
+  } else {
+    return format(".8f")(value).replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.?0+$/, "");
+  }
+};
 
 export default function MarketsTable({ symbols, period }: Props) {
   // Convert symbols like BTCUSDT to BTC for backend query
@@ -25,65 +36,90 @@ export default function MarketsTable({ symbols, period }: Props) {
     { refreshInterval: 5000 }
   );
 
-  if (isLoading) return <>Loading...</>;
-  if (error || !data) return <>Error</>;
+  if (isLoading) {
+    return (
+      <Box sx={{ width: '100%' }}>
+        {symbols.map((symbol, index) => (
+          <Box key={index} sx={{ p: 1.5, borderBottom: '1px solid rgba(224, 224, 224, 0.5)' }}>
+            <Skeleton variant="text" width="100%" height={40} />
+          </Box>
+        ))}
+      </Box>
+    );
+  }
+  
+  if (error || !data) {
+    return (
+      <Box sx={{ p: 2, color: 'error.main', textAlign: 'center' }}>
+        Error al cargar los datos del mercado
+      </Box>
+    );
+  }
 
   const rows = symbols.map((original, idx) => {
     const base = original.replace(/USDT$/, "");
-    const entry = data.data[base] ?? [];
+    const entry = data.data[base] ?? [0, 0, 0];
     return {
       id: idx,
       symbol: original,
-      price: entry[0] ?? 0,
-      change: entry[2] ?? 0, // change % is third column (index 2)
-      history: entry,
+      price: entry[0] || 0,
+      change: entry[2] || 0, // change % is third column (index 2)
     };
   });
 
-  const cols: GridColDef[] = [
-    { field: "symbol", headerName: "Symbol", flex: 1 },
-    { field: "price", headerName: "Price", flex: 1, type: "number" },
-    {
-      field: "change",
-      headerName: `% Change (${period})`,
-      flex: 1,
-      type: "number",
-      valueFormatter: ({ value }) => `${Number(value).toFixed(2)}%`,
-    },
-    {
-      field: "history",
-      headerName: period,
-      flex: 1.2,
-      sortable: false,
-      renderCell: (params) => (
-        <Sparklines data={params.value as number[]} width={100} height={20}>
-          <SparklinesLine color="blue" />
-        </Sparklines>
-      ),
-    },
-  ];
-
   return (
-    <div style={{ width: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <Box sx={{ flex: 1, minHeight: 0 }}>
-        <DataGrid
-          autoHeight
-          density="compact"
-          disableColumnMenu
-          disableSelectionOnClick
-          rows={rows}
-          columns={cols}
-          pageSize={5}
-          rowsPerPageOptions={[5, 10]}
-          sx={{
-            fontSize: "clamp(10px,1.2vw,14px)",
-            '& .MuiDataGrid-cell': {
-              outline: 'none !important',
-              py: 0.5
-            },
-          }}
-        />
-      </Box>
-    </div>
+    <Box sx={{ width: '100%' }}>
+      {rows.map((row) => {
+        const isPositive = row.change >= 0;
+        const changeColor = isPositive ? 'success.main' : 'error.main';
+        const ChangeIcon = isPositive ? TrendingUpIcon : TrendingDownIcon;
+        
+        return (
+          <Box 
+            key={row.id}
+            sx={{
+              p: 1.5,
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              '&:hover': {
+                backgroundColor: 'action.hover',
+              },
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <Box>
+              <Typography variant="subtitle1" fontWeight={500}>
+                {row.symbol.replace('USDT', '')}
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Typography variant="body1" fontWeight={500}>
+                ${formatPrice(row.price)}
+              </Typography>
+              <Box 
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  color: changeColor,
+                  bgcolor: isPositive ? 'rgba(76, 175, 80, 0.1)' : 'rgba(244, 67, 54, 0.1)',
+                  px: 1,
+                  py: 0.5,
+                  borderRadius: 1,
+                  minWidth: 85,
+                  justifyContent: 'center'
+                }}
+              >
+                <ChangeIcon fontSize="small" sx={{ mr: 0.5, fontSize: '1rem' }} />
+                <Typography variant="body2" fontWeight={500}>
+                  {Math.abs(row.change).toFixed(2)}%
+                </Typography>
+              </Box>
+            </Stack>
+          </Box>
+        );
+      })}
+    </Box>
   );
 }
