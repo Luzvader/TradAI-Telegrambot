@@ -18,12 +18,15 @@ interface Props {
 }
 
 const formatPrice = (value: number) => {
-  if (value >= 1000) {
+  // For all values, show full number with thousands separators
+  if (value >= 1) {
     return format(",.0f")(value);
-  } else if (value >= 0.1) {
-    return format(",.2f")(value);
+  } else if (value >= 0.0001) {
+    // For values between 0.0001 and 1, show up to 4 decimal places
+    return format(",.4f")(value).replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.?0+$/, "");
   } else {
-    return format(".8f")(value).replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.?0+$/, "");
+    // For very small numbers, show in scientific notation
+    return value.toExponential(4).replace(/(\.\d*?)0+e/, "$1e");
   }
 };
 
