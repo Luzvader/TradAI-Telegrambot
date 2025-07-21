@@ -17,3 +17,18 @@ def test_monitor_defaults(monkeypatch):
     assert data["timeframe"] == "15m"
     assert captured['columns'] == columns_for_timeframe("15m")
     assert sorted(data["data"].keys()) == ["BINANCE:BTCUSDT"]
+
+def test_markets_ytd(monkeypatch):
+    client = TestClient(app)
+    captured = {}
+    def fake_fetch_markets(self, symbols, columns=None):
+        captured['columns'] = columns
+        return {f"BINANCE:{s}USDT": [1, 1] for s in symbols}
+    monkeypatch.setattr(TradingViewClient, "fetch_markets", fake_fetch_markets)
+
+    resp = client.get("/markets?period=ytd&symbols=BTC")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["symbols"] == ["BTC"]
+    assert captured['columns'] == ["close", "change|YTD"]
+

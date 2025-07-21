@@ -14,6 +14,10 @@ PERIOD_MAP = {
     "24h": None,  # default daily change
     "1w": "1W",
     "1m": "1M",
+    "3m": "3M",
+    "6m": "6M",
+    "1y": "1Y",
+    "ytd": "YTD",
 }
 
 from ..tradingview import TradingViewClient, columns_for_timeframe
