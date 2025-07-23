@@ -7,7 +7,7 @@ indicador.
 """
 from __future__ import annotations
 
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 
 def ema(values: Iterable[float], period: int = 20) -> Optional[float]:
@@ -80,3 +80,110 @@ def rsi(values: Iterable[float], period: int = 14) -> Optional[float]:
     rs = avg_gain / avg_loss
     rsi_val = 100 - (100 / (1 + rs))
     return rsi_val
+
+
+def _ema_sequence(values: Sequence[float], period: int) -> List[float]:
+    """Devuelve la secuencia completa de EMAs para ``values``."""
+
+    if len(values) < period:
+        return []
+
+    k = 2 / (period + 1)
+    ema_prev = sum(values[:period]) / period
+    seq = [ema_prev]
+    for price in values[period:]:
+        ema_prev = price * k + ema_prev * (1 - k)
+        seq.append(ema_prev)
+    return seq
+
+
+def macd(
+    values: Iterable[float],
+    short_period: int = 12,
+    long_period: int = 26,
+    signal_period: int = 9,
+) -> Optional[Tuple[float, float]]:
+    """Calcula MACD y línea de señal.
+
+    Parameters
+    ----------
+    values:
+        Precios de cierre.
+    short_period:
+        Periodo para la EMA corta.
+    long_period:
+        Periodo para la EMA larga.
+    signal_period:
+        Periodo para la línea de señal.
+
+    Returns
+    -------
+    (float, float) | None
+        Tupla ``(macd, signal)`` o ``None`` si no hay suficientes datos.
+    """
+
+    vals = list(values)
+    if len(vals) < long_period + signal_period:
+        return None
+
+    ema_short_seq = _ema_sequence(vals, short_period)
+    ema_long_seq = _ema_sequence(vals, long_period)
+    mlen = min(len(ema_short_seq), len(ema_long_seq))
+    if mlen == 0:
+        return None
+
+    ema_short_seq = ema_short_seq[-mlen:]
+    ema_long_seq = ema_long_seq[-mlen:]
+    macd_seq = [s - l for s, l in zip(ema_short_seq, ema_long_seq)]
+    signal_seq = _ema_sequence(macd_seq, signal_period)
+    if not signal_seq:
+        return None
+    return macd_seq[-1], signal_seq[-1]
+
+
+def atr(
+    highs: Iterable[float],
+    lows: Iterable[float],
+    closes: Iterable[float],
+    period: int = 14,
+) -> Optional[float]:
+    """Calcula el ATR (*Average True Range*).
+
+    Se requieren ``period`` + 1 valores para obtener ``period`` rangos
+    verdaderos.
+    """
+
+    h = list(highs)
+    l = list(lows)
+    c = list(closes)
+    if min(len(h), len(l), len(c)) < period + 1:
+        return None
+
+    trs = []
+    for i in range(-period, 0):
+        tr = max(h[i] - l[i], abs(h[i] - c[i - 1]), abs(l[i] - c[i - 1]))
+        trs.append(tr)
+    return sum(trs) / period
+
+
+def detect_candle(
+    opens: Iterable[float],
+    highs: Iterable[float],
+    lows: Iterable[float],
+    closes: Iterable[float],
+) -> Optional[str]:
+    """Detecta patrones de vela simples (engulfing alcista/bajista)."""
+
+    op = list(opens)
+    cl = list(closes)
+    if len(op) < 2 or len(cl) < 2:
+        return None
+
+    o1, c1 = op[-2], cl[-2]
+    o2, c2 = op[-1], cl[-1]
+
+    if c1 < o1 and c2 > o2 and c2 >= o1 and o2 <= c1:
+        return "bullish_engulfing"
+    if c1 > o1 and c2 < o2 and c2 <= o1 and o2 >= c1:
+        return "bearish_engulfing"
+    return None
