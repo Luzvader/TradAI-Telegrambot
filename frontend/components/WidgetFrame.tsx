@@ -61,7 +61,6 @@ export default function WidgetFrame({ title, children, action, sx = {} }: Props)
         minHeight: 0, // Allow this container to shrink below its content size
         overflow: 'auto', // Changed to auto to allow scrolling if needed
         '& > *': {
-          minHeight: '100%',
           width: '100%',
           boxSizing: 'border-box'
         }
