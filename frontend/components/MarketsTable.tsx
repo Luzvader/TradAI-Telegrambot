@@ -15,6 +15,7 @@ interface MarketResponse {
 interface Props {
   symbols: string[];
   period: string;
+  compact?: boolean;
 }
 
 const formatPrice = (value: number) => {
@@ -30,7 +31,8 @@ const formatPrice = (value: number) => {
   }
 };
 
-export default function MarketsTable({ symbols, period }: Props) {
+
+export default function MarketsTable({ symbols, period, compact = false }: Props) {
   // Convert symbols like BTCUSDT to BTC for backend query
   const baseSymbols = symbols.map((s) => s.replace(/USDT$/, ""));
   const { data, error, isLoading } = useSWR<MarketResponse>(
@@ -73,7 +75,7 @@ export default function MarketsTable({ symbols, period }: Props) {
   });
 
   return (
-    <Box sx={{ width: '100%' }}>
+    <Box sx={{ width: '100%', height: '100%', overflow: 'auto' }}>
       {rows.map((row) => {
         const isPositive = row.change >= 0;
         const changeColor = isPositive ? 'success.main' : 'error.main';
@@ -83,7 +85,7 @@ export default function MarketsTable({ symbols, period }: Props) {
           <Box 
             key={row.id}
             sx={{
-              p: 1.5,
+              p: compact ? '8px 12px' : '12px 16px',
               borderBottom: '1px solid',
               borderColor: 'divider',
               '&:hover': {
@@ -95,12 +97,12 @@ export default function MarketsTable({ symbols, period }: Props) {
             }}
           >
             <Box>
-              <Typography variant="subtitle1" fontWeight={500}>
+              <Typography variant={compact ? "body1" : "subtitle1"} fontWeight={500}>
                 {row.symbol.replace('USDT', '')}
               </Typography>
             </Box>
-            <Stack direction="row" spacing={2} alignItems="center">
-              <Typography variant="body1" fontWeight={500}>
+            <Stack direction="row" spacing={compact ? 1 : 2} alignItems="center">
+              <Typography variant={compact ? "body2" : "body1"} fontWeight={500}>
                 ${formatPrice(row.price)}
               </Typography>
               <Box 
@@ -109,15 +111,19 @@ export default function MarketsTable({ symbols, period }: Props) {
                   alignItems: 'center',
                   color: changeColor,
                   bgcolor: isPositive ? 'rgba(76, 175, 80, 0.1)' : 'rgba(244, 67, 54, 0.1)',
-                  px: 1,
-                  py: 0.5,
+                  px: compact ? 0.75 : 1,
+                  py: compact ? 0.25 : 0.5,
                   borderRadius: 1,
-                  minWidth: 85,
-                  justifyContent: 'center'
+                  minWidth: compact ? 70 : 85,
+                  justifyContent: 'center',
+                  '& .MuiSvgIcon-root': {
+                    fontSize: compact ? '0.875rem' : '1rem',
+                    mr: 0.25
+                  }
                 }}
               >
-                <ChangeIcon fontSize="small" sx={{ mr: 0.5, fontSize: '1rem' }} />
-                <Typography variant="body2" fontWeight={500}>
+                <ChangeIcon fontSize="inherit" />
+                <Typography variant={compact ? "caption" : "body2"} fontWeight={500}>
                   {Math.abs(row.change).toFixed(2)}%
                 </Typography>
               </Box>

@@ -230,7 +230,7 @@ export default function PricesWidget() {
           {error}
         </Typography>
       )}
-      <MarketsTable symbols={symbols} period={period} />
+      <MarketsTable symbols={symbols} period={period} compact />
     </WidgetFrame>
   );
 }
