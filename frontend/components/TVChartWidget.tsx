@@ -17,7 +17,7 @@ export default function TVChartWidget() {
   const src = `https://s.tradingview.com/embed-widget/advanced-chart/?symbol=BINANCE:${symbol}&theme=dark&style=1&locale=en`;
 
   return (
-    <Box sx={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <Box sx={{ height: "100%", display: "flex", flexDirection: "column", pt: 1 }}>
       <Autocomplete
         size="small"
         options={SYMBOLS}
