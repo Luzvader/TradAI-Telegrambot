@@ -25,3 +25,13 @@ def test_strategy_evaluation():
     downtrend = [float(i) for i in range(10, 0, -1)]
     assert strat.evaluate(uptrend) == "BUY"
     assert strat.evaluate(downtrend) == "SELL"
+
+
+def test_macd_strategy_evaluation():
+    strat = strategies.MACDStrategy(
+        name="m", symbol="BTC", short_period=3, long_period=6, signal_period=3
+    )
+    prices_up = [1, 2, 3, 4, 3, 2, 1, 2, 3, 4, 5]
+    prices_down = [5, 4, 3, 4, 5, 6, 5, 4, 3, 2, 1]
+    assert strat.evaluate(prices_up) == "BUY"
+    assert strat.evaluate(prices_down) == "SELL"

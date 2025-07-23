@@ -5,7 +5,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, List
 
-from .indicators import ema
+from .indicators import ema, macd
 
 STRATEGIES_FILE = Path.home() / ".tradai_strategies.json"
 
@@ -26,6 +26,29 @@ class Strategy:
         if short is None or long is None:
             return "HOLD"
         return "BUY" if short > long else "SELL"
+
+
+@dataclass
+class MACDStrategy:
+    """Estrategia basada en el cruce MACD/señal."""
+
+    name: str
+    symbol: str
+    short_period: int = 12
+    long_period: int = 26
+    signal_period: int = 9
+
+    def evaluate(self, prices: List[float]) -> str:
+        result = macd(
+            prices,
+            short_period=self.short_period,
+            long_period=self.long_period,
+            signal_period=self.signal_period,
+        )
+        if result is None:
+            return "HOLD"
+        macd_val, signal_val = result
+        return "BUY" if macd_val > signal_val else "SELL"
 
 
 def load_strategies() -> Dict[str, Strategy]:
