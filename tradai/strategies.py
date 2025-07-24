@@ -91,7 +91,6 @@ class MACDStrategy:
 
 
 def load_strategies() -> Dict[str, Strategy]:
-    """Carga las estrategias guardadas."""
     """Carga las estrategias guardadas de forma robusta."""
     if not STRATEGIES_FILE.exists():
         return {}
