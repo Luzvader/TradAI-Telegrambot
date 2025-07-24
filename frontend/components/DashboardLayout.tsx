@@ -1,83 +1,27 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
-import GridLayout, { Layout } from "react-grid-layout";
-import BalanceWidget from "./BalanceWidget";
-import PricesWidget from "./PricesWidget";
+import { useEffect, useState } from "react";
+import { Box, Button, Stack, Grid } from "@mui/material";
+import WidgetFrame from "./WidgetFrame";
+import { DEFAULT_WIDGETS, WidgetConfig } from "../widgets/widgetConfig";
 import TVChartWidget from "./TVChartWidget";
-import StrategiesWidget from "./StrategiesWidget";
-import ChatWidget from "./ChatWidget";
-import PnlWidget from "./PnlWidget";
-import "react-grid-layout/css/styles.css";
-import "react-resizable/css/styles.css";
-
-interface WidgetConfig {
-  key: string;
-  name: string;
-  component: ReactNode;
-  defaultLayout: Layout;
-  visible: boolean;
-}
-
-const DEFAULT_WIDGETS: WidgetConfig[] = [
-  {
-    key: "balance",
-    name: "Balance",
-    component: <BalanceWidget />,
-    defaultLayout: { i: "balance", x: 0, y: 0, w: 3, h: 2 },
-    visible: true,
-  },
-  {
-    key: "prices",
-    name: "Prices",
-    component: <PricesWidget />,
-    defaultLayout: { i: "prices", x: 3, y: 0, w: 3, h: 4 },
-    visible: true,
-  },
-  {
-    key: "chart",
-    name: "Market Chart",
-    component: <TVChartWidget />,
-    defaultLayout: { i: "chart", x: 0, y: 2, w: 6, h: 6 },
-    visible: true,
-  },
-  {
-    key: "strategies",
-    name: "Strategies",
-    component: <StrategiesWidget />,
-    defaultLayout: { i: "strategies", x: 6, y: 0, w: 2, h: 4 },
-    visible: true,
-  },
-  {
-    key: "chat",
-    name: "Chat",
-    component: <ChatWidget />,
-    defaultLayout: { i: "chat", x: 6, y: 4, w: 2, h: 3 },
-    visible: true,
-  },
-  {
-    key: "pnl",
-    name: "PnL",
-    component: <PnlWidget />,
-    defaultLayout: { i: "pnl", x: 0, y: 8, w: 2, h: 2 },
-    visible: true,
-  },
-];
 
 export default function DashboardLayout() {
   const [widgets, setWidgets] = useState<WidgetConfig[]>(DEFAULT_WIDGETS);
 
-  const layout = widgets
-    .filter((w) => w.visible)
-    .map((w) => ({ ...w.defaultLayout, i: w.key }));
 
-  // Persist layout/visibility in localStorage
+  // Persist visibility in localStorage
   useEffect(() => {
     const saved = localStorage.getItem("dashboard-widgets");
     if (saved) {
       try {
-        const parsed: WidgetConfig[] = JSON.parse(saved);
-        setWidgets(parsed);
+        const parsed: { key: string; visible: boolean }[] = JSON.parse(saved);
+        setWidgets((prev) =>
+          prev.map((w) => {
+            const found = parsed.find((p) => p.key === w.key);
+            return found ? { ...w, visible: found.visible } : w;
+          })
+        );
       } catch (e) {
         console.error("Failed to parse widgets", e);
       }
@@ -85,7 +29,8 @@ export default function DashboardLayout() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("dashboard-widgets", JSON.stringify(widgets));
+    const compact = widgets.map(({ key, visible }) => ({ key, visible }));
+    localStorage.setItem("dashboard-widgets", JSON.stringify(compact));
   }, [widgets]);
 
   const toggleWidget = (key: string) => {
@@ -95,37 +40,89 @@ export default function DashboardLayout() {
   };
 
   return (
-    <div>
+    <Box>
       {/* Controls */}
-      <div style={{ marginBottom: 16 }}>
+      <Stack direction="row" spacing={1} mb={2}>
         {widgets.map((w) => (
-          <button
+          <Button
             key={w.key}
+            variant="outlined"
+            size="small"
             onClick={() => toggleWidget(w.key)}
-            style={{ marginRight: 8 }}
           >
             {w.visible ? "Ocultar" : "Mostrar"} {w.name}
-          </button>
+          </Button>
         ))}
-      </div>
-      <GridLayout
-        className="layout"
-        layout={layout}
-        cols={12}
-        rowHeight={30}
-        width={1200}
-        isDraggable={true}
-        isResizable={true}
-      >
-        {widgets
-          .filter((w) => w.visible)
-          .map((w) => (
-            <div key={w.key} style={{ border: "1px solid #ddd", padding: 8 }}>
-              <h4>{w.name}</h4>
-              {w.component}
-            </div>
-          ))}
-      </GridLayout>
-    </div>
+      </Stack>
+      <Box sx={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        height: 'calc(100vh - 180px)',
+        minHeight: 0, // Allow this container to shrink
+        overflow: 'hidden' // Prevent main container from scrolling
+      }}>
+        {/* Top section - Other widgets (45% of available height) */}
+        <Box sx={{ 
+          flex: '0 0 auto', // Changed to auto to fit content
+          mb: 2,
+          minHeight: 0, // Allow this container to shrink
+          '& .MuiGrid-container': {
+            height: 'auto',
+            alignItems: 'stretch',
+            margin: 0, // Remove default grid spacing
+            width: '100%' // Ensure grid takes full width
+          },
+          '& .MuiGrid-item': {
+            display: 'flex',
+            flexDirection: 'column',
+            padding: '8px',
+            boxSizing: 'border-box',
+            minHeight: 0, // Allow grid items to shrink below content size
+            height: 'auto' // Allow items to determine their own height
+          }
+        }}>
+          <Grid container spacing={2}>
+            {widgets
+              .filter(w => w.visible && w.key !== 'chart')
+              .map((w) => (
+                <Grid
+                  key={w.key}
+                  item
+                  xs={12}
+                  sm={6}
+                  md={4}
+                  lg={w.cols}
+                  xl={w.cols}
+                >
+                  <WidgetFrame title={w.name}>
+                    {w.component}
+                  </WidgetFrame>
+                </Grid>
+              ))}
+          </Grid>
+        </Box>
+        
+        {/* Bottom section - TradingView widget (55% of available height) */}
+        {widgets.some(w => w.visible && w.key === 'chart') && (
+          <Box sx={{ 
+            flex: '1 1 auto', // Changed to auto to fit content
+            mt: 2,
+            minHeight: '300px',
+            display: 'flex',
+            flexDirection: 'column',
+            '& > div': {
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0 // Allow this container to shrink below content size
+            }
+          }}>
+            <WidgetFrame title="Market Chart">
+              <TVChartWidget />
+            </WidgetFrame>
+          </Box>
+        )}
+      </Box>
+    </Box>
   );
 }

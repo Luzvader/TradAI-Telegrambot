@@ -5,13 +5,16 @@ import tradai.web as web
 def test_bot_start_stop(monkeypatch):
     calls = {'run': 0}
 
-    class DummyEngine:
-        def run_forever(self, stop_event=None):
-            calls['run'] += 1
-            if stop_event:
-                stop_event.set()
+    def dummy_start(symbols=None):
+        calls['run'] += 1
+        return 'started'
 
-    monkeypatch.setattr(web, 'BotEngine', lambda symbols: DummyEngine())
+    def dummy_stop():
+        calls['run'] -= 1
+        return 'stopped'
+
+    monkeypatch.setattr(web, 'svc_start_engine', lambda symbols=None: dummy_start(symbols))
+    monkeypatch.setattr(web, 'svc_stop_engine', lambda: dummy_stop())
 
     client = TestClient(web.app)
     resp = client.post('/bot/start')

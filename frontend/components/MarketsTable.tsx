@@ -1,36 +1,136 @@
 "use client";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import useSWR from "swr";
 import { fetcher } from "../utils/fetcher";
+import { Box, Typography, Stack, Skeleton } from "@mui/material";
+import React from "react";
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import TrendingDownIcon from '@mui/icons-material/TrendingDown';
+import { format } from 'd3-format';
 
 interface MarketResponse {
   symbols: string[];
-  data: Record<string, number[]>; // Simplified: [price, change, ...]
+  data: Record<string, number[]>; // [price, change, changePercent, ...]
 }
 
-export default function MarketsTable({ symbols }: { symbols: string[] }) {
+interface Props {
+  symbols: string[];
+  period: string;
+  compact?: boolean;
+}
+
+const formatPrice = (value: number) => {
+  // For all values, show full number with thousands separators
+  if (value >= 1) {
+    return format(",.0f")(value);
+  } else if (value >= 0.0001) {
+    // For values between 0.0001 and 1, show up to 4 decimal places
+    return format(",.4f")(value).replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.?0+$/, "");
+  } else {
+    // For very small numbers, show in scientific notation
+    return value.toExponential(4).replace(/(\.\d*?)0+e/, "$1e");
+  }
+};
+
+
+export default function MarketsTable({ symbols, period, compact = false }: Props) {
+  // Convert symbols like BTCUSDT to BTC for backend query
+  const baseSymbols = symbols.map((s) => s.replace(/USDT$/, ""));
   const { data, error, isLoading } = useSWR<MarketResponse>(
-    `/api/markets?symbols=${symbols.join(",")}`,
-    fetcher
+    `/api/markets?symbols=${baseSymbols.join(",")}&period=${period}`,
+    fetcher,
+    { refreshInterval: 5000 }
   );
 
-  if (isLoading) return <>Loading...</>;
-  if (error || !data) return <>Error</>;
+  if (isLoading) {
+    return (
+      <Box sx={{ width: '100%' }}>
+        {symbols.map((symbol, index) => (
+          <Box key={index} sx={{ p: 1.5, borderBottom: '1px solid rgba(224, 224, 224, 0.5)' }}>
+            <Skeleton variant="text" width="100%" height={40} />
+          </Box>
+        ))}
+      </Box>
+    );
+  }
+  
+  if (error || !data) {
+    return (
+      <Box sx={{ p: 2, color: 'error.main', textAlign: 'center' }}>
+        Error al cargar los datos del mercado
+      </Box>
+    );
+  }
 
-  const rows = data.symbols.map((sym, idx) => ({
-    id: idx,
-    symbol: sym,
-    price: data.data[sym]?.[0] ?? 0,
-  }));
-
-  const cols: GridColDef[] = [
-    { field: "symbol", headerName: "Symbol", width: 120 },
-    { field: "price", headerName: "Price", width: 150, type: "number" },
-  ];
+  const rows = symbols.map((original, idx) => {
+    const base = original.replace(/USDT$/, "");
+    const entry = data.data[base] ?? [0, 0];
+    return {
+      id: idx,
+      symbol: original,
+      price: entry[0] || 0,
+      // The backend returns only price and change %, so the change value is at
+      // index 1.
+      change: entry[1] || 0,
+    };
+  });
 
   return (
-    <div style={{ height: 400 }}>
-      <DataGrid rows={rows} columns={cols} />
-    </div>
+    <Box sx={{ width: '100%', height: '100%', overflow: 'auto' }}>
+      {rows.map((row) => {
+        const isPositive = row.change >= 0;
+        const changeColor = isPositive ? 'success.main' : 'error.main';
+        const ChangeIcon = isPositive ? TrendingUpIcon : TrendingDownIcon;
+        
+        return (
+          <Box 
+            key={row.id}
+            sx={{
+              p: compact ? '8px 12px' : '12px 16px',
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              '&:hover': {
+                backgroundColor: 'action.hover',
+              },
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <Box>
+              <Typography variant={compact ? "body1" : "subtitle1"} fontWeight={500}>
+                {row.symbol.replace('USDT', '')}
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={compact ? 1 : 2} alignItems="center">
+              <Typography variant={compact ? "body2" : "body1"} fontWeight={500}>
+                ${formatPrice(row.price)}
+              </Typography>
+              <Box 
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  color: changeColor,
+                  bgcolor: isPositive ? 'rgba(76, 175, 80, 0.1)' : 'rgba(244, 67, 54, 0.1)',
+                  px: compact ? 0.75 : 1,
+                  py: compact ? 0.25 : 0.5,
+                  borderRadius: 1,
+                  minWidth: compact ? 70 : 85,
+                  justifyContent: 'center',
+                  '& .MuiSvgIcon-root': {
+                    fontSize: compact ? '0.875rem' : '1rem',
+                    mr: 0.25
+                  }
+                }}
+              >
+                <ChangeIcon fontSize="inherit" />
+                <Typography variant={compact ? "caption" : "body2"} fontWeight={500}>
+                  {Math.abs(row.change).toFixed(2)}%
+                </Typography>
+              </Box>
+            </Stack>
+          </Box>
+        );
+      })}
+    </Box>
   );
 }

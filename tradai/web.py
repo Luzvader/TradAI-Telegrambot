@@ -10,46 +10,133 @@ directorio ``webapp`` en la raíz del proyecto.
 
 from __future__ import annotations
 
-from dataclasses import asdict
-from pathlib import Path
 from typing import List
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.staticfiles import StaticFiles
-import threading
+
+from typing import Any
+
+from pathlib import Path
 import json
 
-from .tradingview import TradingViewClient, columns_for_timeframe
+
+from .tradingview import TradingViewClient
+
+from .services.market_service import (
+    fetch_basic,
+    fetch_with_indicators,
+    DEFAULT_SYMBOLS,
+    get_crypto_signals,
+)
+from .strategy import save_strategy as save_rule_strategy
 from .llm_agent import suggest_strategy
 from .wallet import (
     load_wallet_config,
     save_wallet_config,
-    wallet_from_config,
     BinanceWallet,
     load_wallet,
 )
 from .options import load_options, save_options
-from .strategies import Strategy, load_strategies, save_strategy as save_ema_strategy
-from .strategy import (
-    save_strategy as save_rule_strategy,
-    list_strategies as list_rule_strategies,
-    load_strategy as load_rule_strategy,
-    delete_strategy as delete_rule_strategy,
+from .services.strategy_service import (
+    start_engine as svc_start_engine,
+    stop_engine as svc_stop_engine,
+    list_strategies as svc_list_strategies,
+    get_strategy as svc_get_strategy,
+    delete_strategy as svc_delete_strategy,
+    save_strategy as svc_save_strategy,
+    list_orders as svc_list_orders,
 )
-from .bot_engine import BotEngine, ORDERS_FILE
+from .services.pnl_service import calculate_pnl as svc_calculate_pnl
 
 app = FastAPI(title="TradAI Web API")
-client = TradingViewClient()
-DEFAULT_SYMBOLS = ["BTC", "ETH", "XRP", "SOL", "BNB"]
 
-# Execution engine globals
-_bot_thread: threading.Thread | None = None
-_bot_stop = threading.Event()
+
+STRATEGIES_FILE = Path.home() / ".tradai_custom_strategies.json"
+
+@app.post("/strategies")
+def save_strategy(payload: dict = Body(...)):
+    """Guarda una estrategia personalizada enviada desde el frontend."""
+    try:
+        strategies = []
+        if STRATEGIES_FILE.exists():
+            strategies = json.loads(STRATEGIES_FILE.read_text())
+        strategies.append(payload)
+        STRATEGIES_FILE.write_text(json.dumps(strategies, indent=2))
+        return {"status": "ok"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/simulate-strategy")
+def simulate_strategy(payload: dict = Body(...)):
+    """Simula la estrategia sobre el backlog y devuelve el resultado."""
+    backlog_file = Path.home() / ".tradai_signals_backlog"
+    if not backlog_file.exists():
+        return {"result": []}
+    try:
+        backlog = json.loads(backlog_file.read_text())
+    except Exception:
+        return {"result": []}
+    conditions = payload.get("conditions", [])
+    action = payload.get("action", "BUY")
+    amount = payload.get("amount", 10)
+    # Simulación simple: para cada entrada del backlog, verifica si cumple las condiciones y aplica la acción
+    results = []
+    for entry in backlog:
+        match = True
+        for cond in conditions:
+            val = entry.get(cond["indicator"])
+            op = cond["operator"]
+            target = float(cond["value"])
+            if val is None:
+                match = False
+                break
+            if op == ">" and not (val > target):
+                match = False
+            elif op == "<" and not (val < target):
+                match = False
+            elif op == ">=" and not (val >= target):
+                match = False
+            elif op == "<=" and not (val <= target):
+                match = False
+            elif op == "==" and not (val == target):
+                match = False
+        if match:
+            results.append({
+                "timestamp": entry["timestamp"],
+                "symbol": entry["symbol"],
+                "action": action,
+                "amount": amount,
+                "price": entry["price"],
+                "rsi": entry["rsi"],
+                "macd": entry["macd"],
+                "atr": entry["atr"],
+            })
+    return {"result": results}
+
+
+# Endpoint para consultar el backlog de señales y performance
+@app.get("/backlog")
+def get_backlog(symbol: str | None = Query(None, description="Filtrar por símbolo")):
+    """Devuelve el historial de señales y performance del bot."""
+    backlog_file = Path.home() / ".tradai_signals_backlog"
+    if not backlog_file.exists():
+        return {"backlog": []}
+    try:
+        data = json.loads(backlog_file.read_text())
+    except Exception:
+        return {"backlog": []}
+    if symbol:
+        data = [entry for entry in data if entry.get("symbol") == symbol]
+    return {"backlog": data}
+
+# DEFAULT_SYMBOLS imported from market_service
+
 
 
 @app.get("/markets")
 def get_markets(
-    symbols: str | None = Query(None, description="Símbolos separados por coma")
+    symbols: str | None = Query(None, description="Símbolos separados por coma"),
+    period: str = Query("24h", description="1h,4h,24h,1w,1m,3m,6m,1y,ytd"),
 ):
     """Devuelve datos de mercado básicos de TradingView."""
     symbols_list: List[str]
@@ -58,8 +145,8 @@ def get_markets(
     else:
         symbols_list = DEFAULT_SYMBOLS
 
-    markets = client.fetch_markets(symbols_list)
-    return {"symbols": symbols_list, "data": markets}
+    data = fetch_basic(symbols_list, period)
+    return {"symbols": symbols_list, "data": data}
 
 
 @app.get("/monitor")
@@ -78,9 +165,20 @@ def monitor(
     else:
         symbols_list = DEFAULT_SYMBOLS
 
-    columns = columns_for_timeframe(timeframe)
-    data = client.fetch_markets(symbols_list, columns=columns)
+    data = fetch_with_indicators(symbols_list, timeframe)
     return {"timeframe": timeframe, "data": data}
+
+
+@app.get("/signals")
+def signals(
+    symbol: str = Query(..., description="Símbolo de la criptomoneda, ej: BTCUSDT"),
+    interval: str = Query("5m", description="Intervalo de tiempo, ej: 5m, 15m, 1h"),
+):
+    """Devuelve señales e indicadores para un símbolo usando Binance."""
+    result = get_crypto_signals(symbol, interval)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
 
 
 @app.post("/wallet")
@@ -109,13 +207,11 @@ def set_wallet(payload: dict = Body(...)):
 def get_wallet():
     """Devuelve la configuración y balances de la cartera actual."""
     wallet = load_wallet()
-    if not wallet:
-        return {"type": None, "balances": {}}
     try:
         balances = wallet.get_balances()
     except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=400, detail=str(exc))
-    cfg = load_wallet_config() or {}
+    cfg = load_wallet_config() or {"type": "demo"}
     return {"type": cfg.get("type"), "balances": balances}
 
 
@@ -137,46 +233,22 @@ def get_options():
 
 @app.post("/strategies")
 def create_strategy(payload: dict = Body(...)):
-    """Guarda una estrategia."""
-    if payload.get("symbol"):
-        # Estrategia basada en EMAs
-        name = payload.get("name")
-        symbol = payload.get("symbol")
-        if not name or not symbol:
-            raise HTTPException(status_code=400, detail="name y symbol requeridos")
-        strat = Strategy(
-            name=name,
-            symbol=symbol,
-            ema_short=int(payload.get("ema_short", 20)),
-            ema_long=int(payload.get("ema_long", 50)),
-        )
-        try:
-            save_ema_strategy(strat)
-        except Exception as exc:  # pragma: no cover - disk error
-            raise HTTPException(status_code=500, detail=str(exc))
-        return {"status": "ok"}
-
-    # Estrategia basada en reglas simples
+    """Guarda una estrategia (EMA o rule-based) via service layer."""
     try:
-        sid = save_rule_strategy(payload)
-    except Exception as exc:  # pragma: no cover - error inesperado
+        return svc_save_strategy(payload)
+    except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=500, detail=str(exc))
-    return {"id": sid}
 
 
 @app.get("/strategies")
 def get_strategies():
     """Lista estrategias guardadas."""
-    loaded = load_strategies()
-    if loaded:
-        return {"strategies": [asdict(s) for s in loaded.values()]}
-    return {"strategies": list_rule_strategies()}
+    return {"strategies": svc_list_strategies()}
 
 
 @app.get("/strategies/{strategy_id}")
 def get_strategy(strategy_id: str):
-    """Devuelve los datos de la estrategia identificada por ``strategy_id``."""
-    data = load_rule_strategy(strategy_id)
+    data = svc_get_strategy(strategy_id)
     if data is None:
         raise HTTPException(status_code=404, detail="Strategy not found")
     return {"id": strategy_id, "strategy": data}
@@ -184,8 +256,7 @@ def get_strategy(strategy_id: str):
 
 @app.delete("/strategies/{strategy_id}")
 def delete_strategy_route(strategy_id: str):
-    """Elimina la estrategia indicada."""
-    deleted = delete_rule_strategy(strategy_id)
+    deleted = svc_delete_strategy(strategy_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Strategy not found")
     return {"status": "deleted"}
@@ -216,49 +287,36 @@ def llm_strategy_route(payload: dict = Body(...)):
 
 @app.post("/bot/start")
 def start_bot():
-    """Inicia el motor de estrategias en segundo plano."""
-    global _bot_thread, _bot_stop
-    if _bot_thread and _bot_thread.is_alive():
-        return {"status": "running"}
-    engine = BotEngine(DEFAULT_SYMBOLS)
-    _bot_stop.clear()
-    _bot_thread = threading.Thread(
-        target=engine.run_forever, kwargs={"stop_event": _bot_stop}, daemon=True
-    )
-    _bot_thread.start()
-    return {"status": "started"}
+    """Start the BotEngine in the background."""
+    status = svc_start_engine(DEFAULT_SYMBOLS)
+    return {"status": status}
 
 
 @app.post("/bot/stop")
 def stop_bot():
-    """Detiene la ejecución del motor de estrategias."""
-    global _bot_thread, _bot_stop
-    if _bot_thread and _bot_thread.is_alive():
-        _bot_stop.set()
-        _bot_thread.join(timeout=0.1)
-        _bot_thread = None
-        return {"status": "stopped"}
-    return {"status": "not_running"}
+    """Stop the running BotEngine if active."""
+    status = svc_stop_engine()
+    return {"status": status}
 
 
 @app.get("/orders")
 def get_orders():
-    """Devuelve el historial de órdenes ejecutadas."""
-    if not ORDERS_FILE.exists():
-        return []
-    try:
-        return json.loads(ORDERS_FILE.read_text())
-    except Exception:  # pragma: no cover - corrupted file
-        return []
+    return svc_list_orders()
 
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-WEBAPP_DIR = ROOT_DIR / "webapp"
+@app.get("/pnl")
+def get_pnl():
+    """Return simple profit/loss based on logged orders."""
+    pnl = svc_calculate_pnl()
+    return {"pnl": pnl}
 
-if WEBAPP_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(WEBAPP_DIR), html=True), name="static")
-else:
 
-    @app.get("/")
-    def _index_missing():  # pragma: no cover
-        raise HTTPException(status_code=404, detail="Frontend no encontrado")
+@app.post("/chat")
+def chat_route(payload: dict = Body(...)):
+    """Very simple echo chat endpoint."""
+    msg = payload.get("message")
+    if not msg:
+        raise HTTPException(status_code=400, detail="message requerido")
+    return {"reply": msg}
+
+__all__ = ["app", "DEFAULT_SYMBOLS", "TradingViewClient"]

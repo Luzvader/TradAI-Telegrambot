@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 from pathlib import Path
+import os
 
 import uvicorn
 from cryptography import x509
@@ -51,15 +52,14 @@ def generate_cert() -> None:
 
 
 def main() -> None:
-    generate_cert()
+    http_only = bool(os.getenv("TRADAI_HTTP"))
+    if not http_only:
+        generate_cert()
     uvicorn.run(
         app,
-        # Bind only to localhost by default to avoid exposing the service
-        # externally and to match the documentation which references 127.0.0.1.
         host="127.0.0.1",
         port=8000,
-        ssl_keyfile=str(KEY_FILE),
-        ssl_certfile=str(CERT_FILE),
+        **({} if http_only else {"ssl_keyfile": str(KEY_FILE), "ssl_certfile": str(CERT_FILE)})
     )
 
 
