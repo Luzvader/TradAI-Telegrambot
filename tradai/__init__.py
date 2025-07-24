@@ -5,6 +5,7 @@ from .tradingview import TradingViewClient
 from .services.market_service import fetch_with_indicators
 from .strategies import Strategy, MACDStrategy, save_strategy, load_strategies
 from .engine import execute
+from .crypto_bot import process_crypto
 
 __all__ = [
     "TradingViewClient",
@@ -14,4 +15,5 @@ __all__ = [
     "save_strategy",
     "load_strategies",
     "execute",
+    "process_crypto",
 ]

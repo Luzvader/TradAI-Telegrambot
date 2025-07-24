@@ -123,6 +123,18 @@ También puedes guardar estas claves vía `POST /options` o en la sección **Set
 
 ---
 
+## 7.1 Bot con scikit-learn
+
+El módulo `tradai.crypto_bot` integra indicadores clásicos con un modelo de
+`scikit-learn` para predecir señales básicas de compra o venta. Puede ejecutarse
+desde la línea de comandos:
+
+```bash
+python -m tradai.crypto_bot --symbols BTCUSDT,ETHUSDT
+```
+
+---
+
 ## 8. Tests
 
 ```bash
