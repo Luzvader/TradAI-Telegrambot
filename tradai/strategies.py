@@ -92,22 +92,39 @@ class MACDStrategy:
 
 def load_strategies() -> Dict[str, Strategy]:
     """Carga las estrategias guardadas."""
+    """Carga las estrategias guardadas de forma robusta."""
     if not STRATEGIES_FILE.exists():
         return {}
     try:
-        data = json.loads(STRATEGIES_FILE.read_text())
-    except Exception:
+        content = STRATEGIES_FILE.read_text()
+        if not content.strip():
+            return {}
+        data = json.loads(content)
+        if not isinstance(data, dict):
+            return {}
+        return {name: Strategy(**cfg) for name, cfg in data.items() if isinstance(cfg, dict)}
+    except Exception as e:
+        print(f"Error cargando estrategias: {e}")
         return {}
-    return {name: Strategy(**cfg) for name, cfg in data.items()}
 
 
 def save_strategy(strategy: Strategy) -> None:
     """Persiste una estrategia en el archivo configurado."""
     strategies = {name: asdict(s) for name, s in load_strategies().items()}
     strategies[strategy.name] = asdict(strategy)
-    STRATEGIES_FILE.write_text(json.dumps(strategies))
+    STRATEGIES_FILE.write_text(json.dumps(strategies, indent=2, ensure_ascii=False))
 
 
 def get_strategy(name: str) -> Strategy | None:
     """Devuelve la estrategia guardada por nombre."""
     return load_strategies().get(name)
+
+
+def delete_strategy(name: str) -> bool:
+    """Elimina una estrategia guardada por nombre."""
+    strategies = load_strategies()
+    if name in strategies:
+        del strategies[name]
+        STRATEGIES_FILE.write_text(json.dumps({n: asdict(s) for n, s in strategies.items()}, indent=2, ensure_ascii=False))
+        return True
+    return False
