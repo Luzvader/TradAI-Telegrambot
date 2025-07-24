@@ -14,6 +14,11 @@ from typing import List
 
 from fastapi import Body, FastAPI, HTTPException, Query
 
+from typing import Any
+
+from pathlib import Path
+import json
+
 
 from .tradingview import TradingViewClient
 
@@ -21,6 +26,7 @@ from .services.market_service import (
     fetch_basic,
     fetch_with_indicators,
     DEFAULT_SYMBOLS,
+    get_crypto_signals,
 )
 from .strategy import save_strategy as save_rule_strategy
 from .llm_agent import suggest_strategy
@@ -43,6 +49,85 @@ from .services.strategy_service import (
 from .services.pnl_service import calculate_pnl as svc_calculate_pnl
 
 app = FastAPI(title="TradAI Web API")
+
+
+STRATEGIES_FILE = Path.home() / ".tradai_custom_strategies.json"
+
+@app.post("/strategies")
+def save_strategy(payload: dict = Body(...)):
+    """Guarda una estrategia personalizada enviada desde el frontend."""
+    try:
+        strategies = []
+        if STRATEGIES_FILE.exists():
+            strategies = json.loads(STRATEGIES_FILE.read_text())
+        strategies.append(payload)
+        STRATEGIES_FILE.write_text(json.dumps(strategies, indent=2))
+        return {"status": "ok"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/simulate-strategy")
+def simulate_strategy(payload: dict = Body(...)):
+    """Simula la estrategia sobre el backlog y devuelve el resultado."""
+    backlog_file = Path.home() / ".tradai_signals_backlog"
+    if not backlog_file.exists():
+        return {"result": []}
+    try:
+        backlog = json.loads(backlog_file.read_text())
+    except Exception:
+        return {"result": []}
+    conditions = payload.get("conditions", [])
+    action = payload.get("action", "BUY")
+    amount = payload.get("amount", 10)
+    # Simulación simple: para cada entrada del backlog, verifica si cumple las condiciones y aplica la acción
+    results = []
+    for entry in backlog:
+        match = True
+        for cond in conditions:
+            val = entry.get(cond["indicator"])
+            op = cond["operator"]
+            target = float(cond["value"])
+            if val is None:
+                match = False
+                break
+            if op == ">" and not (val > target):
+                match = False
+            elif op == "<" and not (val < target):
+                match = False
+            elif op == ">=" and not (val >= target):
+                match = False
+            elif op == "<=" and not (val <= target):
+                match = False
+            elif op == "==" and not (val == target):
+                match = False
+        if match:
+            results.append({
+                "timestamp": entry["timestamp"],
+                "symbol": entry["symbol"],
+                "action": action,
+                "amount": amount,
+                "price": entry["price"],
+                "rsi": entry["rsi"],
+                "macd": entry["macd"],
+                "atr": entry["atr"],
+            })
+    return {"result": results}
+
+
+# Endpoint para consultar el backlog de señales y performance
+@app.get("/backlog")
+def get_backlog(symbol: str | None = Query(None, description="Filtrar por símbolo")):
+    """Devuelve el historial de señales y performance del bot."""
+    backlog_file = Path.home() / ".tradai_signals_backlog"
+    if not backlog_file.exists():
+        return {"backlog": []}
+    try:
+        data = json.loads(backlog_file.read_text())
+    except Exception:
+        return {"backlog": []}
+    if symbol:
+        data = [entry for entry in data if entry.get("symbol") == symbol]
+    return {"backlog": data}
 
 # DEFAULT_SYMBOLS imported from market_service
 
@@ -82,6 +167,18 @@ def monitor(
 
     data = fetch_with_indicators(symbols_list, timeframe)
     return {"timeframe": timeframe, "data": data}
+
+
+@app.get("/signals")
+def signals(
+    symbol: str = Query(..., description="Símbolo de la criptomoneda, ej: BTCUSDT"),
+    interval: str = Query("5m", description="Intervalo de tiempo, ej: 5m, 15m, 1h"),
+):
+    """Devuelve señales e indicadores para un símbolo usando Binance."""
+    result = get_crypto_signals(symbol, interval)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
 
 
 @app.post("/wallet")

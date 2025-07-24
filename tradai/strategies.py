@@ -7,6 +7,45 @@ from typing import Dict, List
 
 from .indicators import ema, macd
 
+from .indicators import rsi, atr, detect_candle
+import pandas as pd
+
+def generate_signals(df: pd.DataFrame, symbol: str) -> list:
+    """Genera señales usando EMA, RSI, MACD, ATR y patrones de vela."""
+    signals = []
+    for i in range(1, len(df)):
+        # Verifica que los indicadores estén presentes
+        if (
+            pd.notna(df['rsi'].iloc[i]) and
+            pd.notna(df['atr'].iloc[i]) and
+            'candle_pattern' in df.columns and pd.notna(df['candle_pattern'].iloc[i])
+        ):
+            buy_cond = (
+                df['close'].iloc[i] > df['ema'].iloc[i] and
+                df['close'].iloc[i-1] <= df['ema'].iloc[i-1] and
+                df['rsi'].iloc[i] < 30 and
+                df['macd'].iloc[i] > df['macd_signal'].iloc[i] and
+                df['atr'].iloc[i] < df['atr'].mean() and
+                df['candle_pattern'].iloc[i] in ['Hammer', 'bullish_engulfing']
+            )
+            sell_cond = (
+                df['close'].iloc[i] < df['ema'].iloc[i] and
+                df['close'].iloc[i-1] >= df['ema'].iloc[i-1] and
+                df['rsi'].iloc[i] > 70 and
+                df['macd'].iloc[i] < df['macd_signal'].iloc[i] and
+                df['atr'].iloc[i] > df['atr'].mean() and
+                df['candle_pattern'].iloc[i] in ['Bearish Engulfing', 'bearish_engulfing']
+            )
+            if buy_cond:
+                signals.append("BUY")
+            elif sell_cond:
+                signals.append("SELL")
+            else:
+                signals.append("HOLD")
+        else:
+            signals.append("HOLD")
+    return signals
+
 STRATEGIES_FILE = Path.home() / ".tradai_strategies.json"
 
 

@@ -1,0 +1,1 @@
+La idea de external es tener una referencia de bot creado por un amigo para integrarlo al proyecto general
