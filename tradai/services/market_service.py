@@ -113,27 +113,77 @@ _client = TradingViewClient()
 
 DEFAULT_SYMBOLS: Sequence[str] = ("BTC", "ETH", "XRP", "SOL", "BNB")
 
-def fetch_basic(symbols: Sequence[str] | None = None, period: str = "24h"):
-    """Return latest price and change (% change) for the given symbols and period."""
-    if symbols is None:
-        symbols = DEFAULT_SYMBOLS
+def fetch_basic(symbols: Sequence[str] | None = None, period: str = "24h") -> dict:
+    """Return latest price and change (% change) for the given symbols and period.
+    
+    Args:
+        symbols: List of symbols to fetch data for. If None, uses DEFAULT_SYMBOLS.
+        period: Time period for the change calculation (e.g., '24h', '1w').
+        
+    Returns:
+        Dictionary mapping symbols to their market data. Empty dict on error.
+    """
+    try:
+        if symbols is None:
+            symbols = DEFAULT_SYMBOLS
+        elif not symbols:
+            logging.warning("No symbols provided to fetch_basic")
+            return {}
 
-    res = PERIOD_MAP.get(period, None)
-    suffix = f"|{res}" if res else ""
-    cols = [
-        "close",
-        f"change{suffix}",
-    ]
-    raw = _client.fetch_markets(list(symbols), columns=cols)
-    # Convert keys like 'BINANCE:BTCUSDT' -> 'BTC'
-    cleaned = {
-        key.split(":")[1].removesuffix("USDT"): val for key, val in raw.items()
-    }
-    return cleaned
+        res = PERIOD_MAP.get(period)
+        suffix = f"|{res}" if res else ""
+        cols = ["close", f"change{suffix}"]
+        
+        raw = _client.fetch_markets(list(symbols), columns=cols)
+        if not raw:
+            logging.warning("No data received from TradingView")
+            return {}
+            
+        # Convert keys like 'BINANCE:BTCUSDT' -> 'BTC'
+        cleaned = {}
+        for key, val in raw.items():
+            try:
+                if ":" in key and key.endswith("USDT"):
+                    symbol = key.split(":")[1].removesuffix("USDT")
+                    cleaned[symbol] = val
+            except Exception as e:
+                logging.warning("Error processing symbol %s: %s", key, str(e))
+                continue
+                
+        return cleaned
+        
+    except Exception as e:
+        logging.error("Error in fetch_basic: %s", str(e), exc_info=True)
+        return {}
 
-def fetch_with_indicators(symbols: Sequence[str] | None, timeframe: str):
-    """Return price plus indicators for symbols and timeframe."""
-    if symbols is None:
-        symbols = DEFAULT_SYMBOLS
-    cols = columns_for_timeframe(timeframe)
-    return _client.fetch_markets(list(symbols), columns=cols)
+def fetch_with_indicators(symbols: Sequence[str] | None, timeframe: str) -> dict:
+    """Return price plus indicators for symbols and timeframe.
+    
+    Args:
+        symbols: List of symbols to fetch data for. If None, uses DEFAULT_SYMBOLS.
+        timeframe: Timeframe for the indicators (e.g., '1h', '4h').
+        
+    Returns:
+        Dictionary mapping symbols to their market data with indicators. Empty dict on error.
+    """
+    try:
+        if symbols is None:
+            symbols = DEFAULT_SYMBOLS
+        elif not symbols:
+            logging.warning("No symbols provided to fetch_with_indicators")
+            return {}
+            
+        cols = columns_for_timeframe(timeframe)
+        if not cols:
+            logging.error("No columns defined for timeframe: %s", timeframe)
+            return {}
+            
+        result = _client.fetch_markets(list(symbols), columns=cols)
+        if not result:
+            logging.warning("No data received for indicators from TradingView")
+            
+        return result
+        
+    except Exception as e:
+        logging.error("Error in fetch_with_indicators: %s", str(e), exc_info=True)
+        return {}

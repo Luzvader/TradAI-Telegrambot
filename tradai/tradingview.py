@@ -95,8 +95,11 @@ class TradingViewClient:
         Returns:
             Un diccionario mapeando símbolos a sus datos respectivos.
         """
-        payload = self._build_payload(symbols, columns)
+        if not symbols:
+            logging.warning("No se proporcionaron símbolos para buscar")
+            return {}
 
+        payload = self._build_payload(symbols, columns)
         req = request.Request(
             self.BASE_URL,
             data=json.dumps(payload).encode("utf-8"),
@@ -104,17 +107,52 @@ class TradingViewClient:
         )
 
         try:
-            with request.urlopen(req) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except (error.URLError, error.HTTPError, ValueError) as exc:
-            logging.warning("Fallo al consultar TradingView: %s", exc)
+            with request.urlopen(req, timeout=10) as resp:
+                response_data = resp.read().decode("utf-8")
+                data = json.loads(response_data)
+                
+                # Verificar si la respuesta contiene un error
+                if not isinstance(data, dict):
+                    logging.error("Respuesta inesperada de TradingView: %s", response_data[:500])
+                    return {}
+                    
+                if "error" in data:
+                    logging.error("Error de TradingView: %s", data.get("error", "Error desconocido"))
+                    return {}
+                    
+                if "data" not in data:
+                    logging.error("Estructura de respuesta inesperada: %s", data)
+                    return {}
+
+        except (error.URLError, error.HTTPError) as exc:
+            logging.error("Error de conexión con TradingView: %s", str(exc))
+            return {}
+        except json.JSONDecodeError as exc:
+            logging.error("Error al decodificar la respuesta de TradingView: %s", str(exc))
+            return {}
+        except Exception as exc:
+            logging.error("Error inesperado al obtener datos de TradingView: %s", str(exc))
             return {}
 
         # Convertir la respuesta a un mapeo símbolo -> lista de datos
         markets: Dict[str, List[Any]] = {}
-        for item in data.get("data", []):
-            symbol = item.get("s")
-            if symbol:
-                markets[symbol] = item.get("d", [])
+        try:
+            for item in data.get("data", []):
+                if not isinstance(item, dict):
+                    continue
+                    
+                symbol = item.get("s")
+                if not symbol:
+                    continue
+                    
+                market_data = item.get("d", [])
+                if not isinstance(market_data, list):
+                    market_data = []
+                    
+                markets[symbol] = market_data
+                
+        except Exception as exc:
+            logging.error("Error al procesar los datos de TradingView: %s", str(exc))
+            return {}
 
         return markets
