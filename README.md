@@ -79,6 +79,13 @@ npm install
 # npm run lint  # comprobación de estilo
 ```
 
+### 4.4 Backend + frontend juntos
+
+```bash
+python start.py   # lanza FastAPI y Next.js a la vez
+```
+El script establece `TRADAI_HTTP=1` y se apoya en `npm run dev` para el frontend.
+
 ---
 
 ## 5. Uso rápido
