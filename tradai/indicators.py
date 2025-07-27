@@ -183,13 +183,23 @@ def detect_candle(
             logger.warning("No hay suficientes datos para detectar patrones de vela")
             return None
 
-        # Patrón de martillo
         c1, o1, h1, l1 = cl[-2], op[-2], h[-2], l[-2]
         c2, o2, h2, l2 = cl[-1], op[-1], h[-1], l[-1]
+        # Engulfing alcista
+        if c1 < o1 and c2 > o2 and c2 >= o1 and o2 <= c1:
+            return "bullish_engulfing"
 
-        if c1 < o1 and c2 > o2 and (c2 - o2) < (o1 - c1) * 0.5:
-            return "Hammer"
-        
+        # Engulfing bajista
+        if c1 > o1 and c2 < o2 and c2 <= o1 and o2 >= c1:
+            return "bearish_engulfing"
+
+        # Patrón de martillo sencillo
+        body = abs(c2 - o2)
+        lower_shadow = min(o2, c2) - l2
+        upper_shadow = h2 - max(o2, c2)
+        if body > 0 and lower_shadow > 2 * body and upper_shadow < body and c2 > o2:
+            return "hammer"
+
         return None  # No se detectó ningún patrón
     except (TypeError, ValueError, KeyError) as e:
         logger.error(f"Error detectando patrón de vela: {e}")

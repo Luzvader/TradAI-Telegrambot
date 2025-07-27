@@ -15,33 +15,28 @@ Módulos principales:
 
 __version__ = "1.0.0"
 
-# Cliente para TradingView
-from .tradingview import TradingViewClient
+# Cliente para TradingView y otros módulos opcionales
+try:  # pragma: no cover - optional imports for lightweight testing
+    from .tradingview import TradingViewClient
+    from .services.market_service import fetch_with_indicators
+    from .strategies import (
+        Strategy,
+        MACDStrategy,
+        save_strategy,
+        load_strategies,
+    )
+    from .engine import execute
+    from .crypto_bot import process_crypto
 
-# Servicios de mercado e indicadores técnicos
-from .services.market_service import fetch_with_indicators
-
-# Estrategias y utilidades de gestión
-from .strategies import (
-    Strategy,
-    MACDStrategy,
-    save_strategy,
-    load_strategies,
-)
-
-# Motor de ejecución de estrategias
-from .engine import execute
-
-# Procesamiento específico para criptomonedas
-from .crypto_bot import process_crypto
-
-__all__ = [
-    "TradingViewClient",
-    "fetch_with_indicators",
-    "Strategy",
-    "MACDStrategy",
-    "save_strategy",
-    "load_strategies",
-    "execute",
-    "process_crypto",
-]
+    __all__ = [
+        "TradingViewClient",
+        "fetch_with_indicators",
+        "Strategy",
+        "MACDStrategy",
+        "save_strategy",
+        "load_strategies",
+        "execute",
+        "process_crypto",
+    ]
+except Exception:  # pragma: no cover - ignore missing heavy deps
+    __all__ = []
