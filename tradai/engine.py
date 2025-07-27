@@ -151,6 +151,7 @@ def execute(strategy: Strategy, prices: List[float], wallet: Wallet, amount: flo
     result = execute_strategy(strategy, prices, wallet, amount)
     return result.get("action", "HOLD")
 
+
 # Ejemplo de uso con simulación y backtesting
 if __name__ == "__main__":
     from .strategies import MyStrategy
