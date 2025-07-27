@@ -138,6 +138,7 @@ python -m tradai.crypto_bot --symbols BTCUSDT,ETHUSDT
 ## 8. Tests
 
 ```bash
+pip install -r requirements-dev.txt
 pytest -q
 ```
 Las pruebas utilizan **httpx** para llamar a la API de forma asíncrona y cubren los servicios principales.
