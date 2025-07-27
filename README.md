@@ -119,7 +119,13 @@ Consulta Swagger para parámetros detallados y ejemplos.
 | `BINANCE_API_SECRET`| «                                |
 | `API_BASE_URL`      | URL base de la API (por defecto `http://127.0.0.1:8000`) |
 
-También puedes guardar estas claves vía `POST /options` o en la sección **Settings** del panel. `API_BASE_URL` puede definirse en `.env.local` o en el entorno de despliegue.
+También puedes guardar estas claves vía `POST /options` o en la sección **Settings** del panel. Para usar el panel web copia `.env.example` a `.env.local` y edita los valores:
+
+```bash
+cp .env.example .env.local
+```
+
+Si solo ejecutas el backend exporta las variables en tu terminal o configúralas en tu entorno de despliegue. `API_BASE_URL` se utilizará en ambos casos.
 
 ---
 
