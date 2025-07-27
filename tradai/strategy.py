@@ -53,35 +53,17 @@ def detect_candle(df: pd.DataFrame) -> pd.Series:
 
 @dataclass
 class Estrategia:
-    """Estrategia avanzada para criptomonedas utilizando indicadores como EMA, RSI, MACD y ATR."""
+    """Estrategia básica con reglas de compra y venta por precio."""
 
     name: str
-    symbol: str
-    ema_short: int = 20
-    ema_long: int = 50
-    rsi_period: int = 14
-    macd_short: int = 12
-    macd_long: int = 26
-    macd_signal: int = 9
-    atr_period: int = 14
-    buy_above_rsi: float = 30
-    sell_below_rsi: float = 70
+    buy_above: float
+    sell_below: float
 
-    def evaluate(self, df: pd.DataFrame) -> str:
-        """Evalúa señales de compra, venta o mantener basadas en los indicadores."""
-
-        # Calcular los indicadores
-        rsi_value = rsi(df['close'].tolist(), self.rsi_period)
-        atr_value = atr(df, self.atr_period).iloc[-1]
-        ema_short_value = ema(df['close'].tolist(), self.ema_short)
-        ema_long_value = ema(df['close'].tolist(), self.ema_long)
-        macd_value = ema(df['close'].tolist(), self.macd_short) - ema(df['close'].tolist(), self.macd_long)
-        macd_signal_value = ema([macd_value] * self.macd_signal, self.macd_signal)  # simplificado
-
-        # Evaluar las condiciones para comprar o vender
-        if rsi_value < self.buy_above_rsi and macd_value > macd_signal_value and df['close'].iloc[-1] > ema_short_value:
+    def evaluate(self, data: Dict[str, float]) -> str:
+        price = data.get("price", 0)
+        if price > self.buy_above:
             return "BUY"
-        if rsi_value > self.sell_below_rsi and macd_value < macd_signal_value and df['close'].iloc[-1] < ema_short_value:
+        if price < self.sell_below:
             return "SELL"
         return "HOLD"
 

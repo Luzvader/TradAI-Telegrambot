@@ -16,6 +16,9 @@ from sklearn.ensemble import RandomForestClassifier
 
 from .tradingview import TradingViewClient
 from .wallet import load_wallet
+
+# Default path for logged orders used by services and tests
+ORDERS_FILE = Path.home() / ".tradai_orders"
 from .services.market_service import get_crypto_signals
 
 # ----------------------------

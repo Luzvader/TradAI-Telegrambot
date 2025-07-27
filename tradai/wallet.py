@@ -5,6 +5,14 @@ from base64 import b64encode, b64decode
 from pathlib import Path
 from typing import Dict, Optional
 
+
+class InsufficientFundsError(Exception):
+    """Señala que no hay fondos suficientes para realizar la operación."""
+
+
+class InvalidOrderError(Exception):
+    """Señala que la orden proporcionada es inválida."""
+
 from binance.client import Client
 
 from .options import OPTIONS_FILE, load_options, save_options
