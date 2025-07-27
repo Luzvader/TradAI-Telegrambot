@@ -9,6 +9,7 @@ from typing import Dict, List, Sequence, Union
 
 from ..bot_engine import BotEngine, ORDERS_FILE
 from ..strategies import Strategy, load_strategies, save_strategy as save_ema_strategy
+from ..strategies import list_default_strategies
 from ..strategy import (
     save_strategy as save_rule_strategy,
     list_strategies as list_rule_strategies,
@@ -65,6 +66,10 @@ def list_strategies() -> List[Union[dict, str]]:
         result.extend(asdict(s) for s in loaded.values())
     result.extend(list_rule_strategies())
     return result
+
+def list_default() -> List[dict]:
+    """Devuelve las estrategias predeterminadas disponibles."""
+    return [asdict(s) for s in list_default_strategies()]
 
 def get_strategy(strategy_id: str):
     return load_rule_strategy(strategy_id)
