@@ -185,7 +185,6 @@ def detect_candle(
 
         c1, o1, h1, l1 = cl[-2], op[-2], h[-2], l[-2]
         c2, o2, h2, l2 = cl[-1], op[-1], h[-1], l[-1]
-
         # Engulfing alcista
         if c1 < o1 and c2 > o2 and c2 >= o1 and o2 <= c1:
             return "bullish_engulfing"

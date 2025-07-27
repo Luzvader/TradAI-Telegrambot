@@ -35,11 +35,18 @@ def log_transaction(
     except Exception as e:
         logger.error(f"Error al registrar transacción: {e}")
 
-def simulate_order(action: str, amount: float, wallet: Wallet, price: float, fee_rate: float = 0.001) -> str:
+def simulate_order(
+    action: str,
+    amount: float,
+    wallet: Wallet,
+    price: float,
+    symbol: str,
+    fee_rate: float = 0.001,
+) -> str:
     """Simula una operación sin ejecutar realmente la orden."""
     total = amount * price * (1 + fee_rate) if action == "BUY" else amount * price * (1 - fee_rate)
     try:
-        if action == "BUY" and wallet.balance >= total:
+        if action == "BUY" and wallet.get_balance("USDT") >= total:
             return f"Simulación exitosa: Compra de {amount} a {price} (total con fee: {total:.2f})"
         elif action == "SELL" and wallet.get_balance(symbol) >= amount:
             return f"Simulación exitosa: Venta de {amount} a {price} (total con fee: {total:.2f})"
@@ -102,28 +109,28 @@ def execute_strategy(
         
         # Simulación de la orden
         if simulate:
-            message = simulate_order(action, amount, wallet, price)
+            message = simulate_order(action, amount, wallet, price, strategy.symbol)
             log_transaction(strategy.symbol, action, amount, price, total, transaction_file, file_lock, simulated=True)
             return {"status": "simulated", "action": action, "message": message, "price": price, "amount": amount, "total": total}
         
         # Ejecución real
         if action == "BUY":
-            if wallet.balance >= total:
+            if wallet.get_balance("USDT") >= total:
                 wallet.place_order(strategy.symbol, action, amount)
                 log_transaction(strategy.symbol, action, amount, price, total, transaction_file, file_lock)
-                logger.info(f"Orden ejecutada: {action} {amount} {symbol} a {price}")
+                logger.info(f"Orden ejecutada: {action} {amount} {strategy.symbol} a {price}")
                 return {"status": "success", "action": action, "price": price, "amount": amount, "total": total}
             else:
                 return {"status": "failed", "message": "Fondos insuficientes para la compra"}
-        
+
         elif action == "SELL":
             if wallet.get_balance(strategy.symbol) >= amount:
                 wallet.place_order(strategy.symbol, action, amount)
                 log_transaction(strategy.symbol, action, amount, price, total, transaction_file, file_lock)
-                logger.info(f"Orden ejecutada: {action} {amount} {symbol} a {price}")
+                logger.info(f"Orden ejecutada: {action} {amount} {strategy.symbol} a {price}")
                 return {"status": "success", "action": action, "price": price, "amount": amount, "total": total}
             else:
-                return {"status": "failed", "message": f"No tienes suficientes {symbol} para vender."}
+                return {"status": "failed", "message": f"No tienes suficientes {strategy.symbol} para vender."}
     
     except InsufficientFundsError as e:
         logger.error(f"Fondos insuficientes para la orden: {e}")
