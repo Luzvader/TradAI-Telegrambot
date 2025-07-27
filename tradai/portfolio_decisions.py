@@ -73,7 +73,7 @@ class Portfolio:
         """
         return self.cash + sum(p.value() for p in self.positions.values())
 
-    @cachetools.cached(WEIGHTS_CACHE)
+    @cachetools.cachedmethod(lambda self: WEIGHTS_CACHE, key=lambda self: id(self))
     def weights(self) -> Dict[str, float]:
         """Calcula los porcentajes del portafolio por activo.
 
@@ -192,11 +192,19 @@ def decide_actions(
         sym_threshold = threshold.get(sym, 0.05)
         diff_weight, current_value = calculate_adjustment(portfolio, sym, prices, target_weight, total_value)
 
+        decision, amount = "HOLD", 0.0
         if abs(diff_weight) > sym_threshold:
             target_value = target_weight * total_value
             to_adjust_value = target_value - current_value
-            if sym in prices and prices[sym] > 0:
-                to_adjust_amount = to_adjust_value / prices[sym]
+            price = prices.get(sym)
+            if price and price > 0:
+                to_adjust_amount = to_adjust_value / price
                 if to_adjust_amount > 0:
                     decision, amount = handle_buy_decision(to_adjust_value, available_cash, to_adjust_amount)
-                    available_cash -= to_adjust
+                    if decision == "BUY":
+                        available_cash -= amount * price
+                elif to_adjust_amount < 0:
+                    decision, amount = handle_sell_decision(to_adjust_amount, portfolio, sym)
+        decisions[sym] = (decision, amount)
+
+    return decisions

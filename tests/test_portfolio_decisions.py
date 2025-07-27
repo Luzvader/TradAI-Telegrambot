@@ -28,5 +28,5 @@ def test_decide_actions():
     target = {"BTC": 0.5, "ETH": 0.5}
     prices = {"BTC": 10000.0, "ETH": 100.0}
     actions = decide_actions(p, target, prices, threshold=0.1)
-    assert actions["BTC"] == "BUY"
-    assert actions["ETH"] == "HOLD"
+    assert actions["BTC"][0] == "BUY"
+    assert actions["ETH"][0] == "HOLD"
