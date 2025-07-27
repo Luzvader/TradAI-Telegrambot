@@ -18,6 +18,9 @@ from .tradingview import TradingViewClient
 from .wallet import load_wallet
 from .services.market_service import get_crypto_signals
 
+# Ruta por defecto para el registro de órdenes
+ORDERS_FILE = Path.home() / ".tradai_orders"
+
 # ----------------------------
 # Utilidades
 # ----------------------------
@@ -100,7 +103,8 @@ class BotEngine:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.backlog_file = self.data_dir / ".tradai_signals_backlog"
         self.model_file = self.data_dir / ".tradai_ml_model.pkl"
-        self.orders_file = self.data_dir / ".tradai_orders"
+        # Usa el nombre de ORDERS_FILE dentro del directorio de datos
+        self.orders_file = self.data_dir / ORDERS_FILE.name
 
         self.ml_model = RandomForestClassifier()
         self.ml_trained = False

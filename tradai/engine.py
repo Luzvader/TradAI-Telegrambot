@@ -144,6 +144,13 @@ def execute_strategy(
         logger.critical(f"Error inesperado: {e}")
         return {"status": "failed", "message": "Error inesperado"}
 
+
+# Compatibilidad con versiones anteriores
+def execute(strategy: Strategy, prices: List[float], wallet: Wallet, amount: float = 1.0) -> str:
+    """Alias sencillo que devuelve solo la acción ejecutada."""
+    result = execute_strategy(strategy, prices, wallet, amount)
+    return result.get("action", "HOLD")
+
 # Ejemplo de uso con simulación y backtesting
 if __name__ == "__main__":
     from .strategies import MyStrategy

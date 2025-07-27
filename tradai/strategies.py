@@ -104,6 +104,20 @@ class MACDStrategy(BaseStrategy):
         macd_val, signal_val = result
         return "BUY" if macd_val > signal_val else "SELL"
 
+# Estrategias predeterminadas incluidas en el paquete
+DEFAULT_STRATEGIES = [
+    EMAStrategy(name="ema_default", symbol="BTC"),
+    MACDStrategy(name="macd_default", symbol="BTC"),
+]
+
+def list_default_strategies() -> List[BaseStrategy]:
+    """Devuelve las estrategias incluidas de forma predeterminada."""
+    return DEFAULT_STRATEGIES
+
+# Alias de compatibilidad para versiones antiguas
+# 'Strategy' solía ser la estrategia EMA por defecto
+Strategy = EMAStrategy
+
 
 # Cargar las estrategias desde un archivo JSON
 def load_strategies() -> Dict[str, BaseStrategy]:

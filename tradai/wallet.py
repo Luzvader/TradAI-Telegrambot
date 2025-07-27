@@ -7,6 +7,14 @@ from typing import Dict, Optional
 
 from binance.client import Client
 
+# Excepciones personalizadas utilizadas por otros módulos
+class InsufficientFundsError(Exception):
+    """Señala que la wallet no tiene fondos suficientes para una operación."""
+
+
+class InvalidOrderError(Exception):
+    """Indica que la orden enviada no es válida."""
+
 from .options import OPTIONS_FILE, load_options, save_options
 
 # Backwards compatibility alias

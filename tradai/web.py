@@ -53,8 +53,8 @@ app = FastAPI(title="TradAI Web API")
 
 STRATEGIES_FILE = Path.home() / ".tradai_custom_strategies.json"
 
-@app.post("/strategies")
-def save_strategy(payload: dict = Body(...)):
+@app.post("/custom-strategies")
+def save_custom_strategy(payload: dict = Body(...)):
     """Guarda una estrategia personalizada enviada desde el frontend."""
     try:
         strategies = []
@@ -244,6 +244,12 @@ def create_strategy(payload: dict = Body(...)):
 def get_strategies():
     """Lista estrategias guardadas."""
     return {"strategies": svc_list_strategies()}
+
+
+@app.get("/strategies/defaults")
+def get_default_strategies():
+    """Devuelve las estrategias incluidas por defecto."""
+    return {"strategies": svc_list_default()}
 
 
 @app.get("/strategies/{strategy_id}")
