@@ -8,7 +8,20 @@ import cachetools
 import threading
 import ast
 import openai
-from openai.error import AuthenticationError, RateLimitError, APIError, OpenAIError
+try:  # Compatibilidad con OpenAI >=1.0
+    from openai.error import (
+        AuthenticationError,
+        RateLimitError,
+        APIError,
+        OpenAIError,
+    )
+except Exception:  # pragma: no cover - fallback para nuevas versiones
+    from openai import (
+        AuthenticationError,
+        RateLimitError,
+        APIError,
+        OpenAIError,
+    )
 from retry import retry
 from .options import load_options
 from .strategies import Strategy

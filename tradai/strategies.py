@@ -82,6 +82,13 @@ class EMAStrategy(BaseStrategy):
         return "BUY" if short > long else "SELL"
 
 
+# Alias simple para compatibilidad con la API y los tests
+@dataclass
+class Strategy(EMAStrategy):
+    """Estrategia por defecto basada en dos EMAs."""
+    pass
+
+
 @dataclass
 class MACDStrategy(BaseStrategy):
     """Estrategia basada en el cruce de MACD y la señal."""

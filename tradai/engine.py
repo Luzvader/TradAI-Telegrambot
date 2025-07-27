@@ -144,6 +144,23 @@ def execute_strategy(
         logger.critical(f"Error inesperado: {e}")
         return {"status": "failed", "message": "Error inesperado"}
 
+
+def execute(
+    strategy: Strategy,
+    prices: List[float],
+    wallet: Wallet,
+    amount: float = 1.0,
+) -> str:
+    """Convenient wrapper returning only the resulting action."""
+    result = execute_strategy(
+        strategy,
+        prices,
+        wallet,
+        amount=amount,
+        simulate=False,
+    )
+    return result.get("action", "HOLD") if result.get("status") in {"success", "simulated"} else "HOLD"
+
 # Ejemplo de uso con simulación y backtesting
 if __name__ == "__main__":
     from .strategies import MyStrategy
