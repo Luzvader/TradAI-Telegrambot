@@ -145,21 +145,12 @@ def execute_strategy(
         return {"status": "failed", "message": "Error inesperado"}
 
 
-def execute(
-    strategy: Strategy,
-    prices: List[float],
-    wallet: Wallet,
-    amount: float = 1.0,
-) -> str:
-    """Convenient wrapper returning only the resulting action."""
-    result = execute_strategy(
-        strategy,
-        prices,
-        wallet,
-        amount=amount,
-        simulate=False,
-    )
-    return result.get("action", "HOLD") if result.get("status") in {"success", "simulated"} else "HOLD"
+# Compatibilidad con versiones anteriores
+def execute(strategy: Strategy, prices: List[float], wallet: Wallet, amount: float = 1.0) -> str:
+    """Alias sencillo que devuelve solo la acción ejecutada."""
+    result = execute_strategy(strategy, prices, wallet, amount)
+    return result.get("action", "HOLD")
+
 
 # Ejemplo de uso con simulación y backtesting
 if __name__ == "__main__":

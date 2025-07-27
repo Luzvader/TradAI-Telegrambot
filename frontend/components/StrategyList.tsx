@@ -31,6 +31,7 @@ export default function StrategyList() {
   const { data, error, mutate } = useSWR<StratResp>("/api/strategies", fetcher, {
     refreshInterval: 60000,
   });
+  const { data: defaults } = useSWR<StratResp>("/api/strategies/defaults", fetcher);
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Strategy | null>(null);
 
@@ -49,28 +50,37 @@ export default function StrategyList() {
     window.location.href = `/strategies/edit/${id}`;
   };
 
-  if (!data && !error) return <CircularProgress />;
+  if (!data && !defaults && !error) return <CircularProgress />;
   if (error || !data) return <Typography>Error loading</Typography>;
+
+  const merged: (Strategy & {default?: boolean})[] = [
+    ...((defaults?.strategies ?? []) as Strategy[]).map((s) => ({ ...s, default: true })),
+    ...(data?.strategies ?? []) as Strategy[],
+  ];
 
   return (
     <>
       <List>
-        {data.strategies.map((s, idx) => {
+        {merged.map((s, idx) => {
           const strat = typeof s === "string" ? { id: s } : s;
           return (
             <ListItem key={idx} divider secondaryAction={
               <>
-                <IconButton edge="end" aria-label="edit" onClick={() => handleEdit(strat)}>
-                  <EditIcon />
-                </IconButton>
-                <IconButton edge="end" aria-label="delete" onClick={() => handleDelete(strat.id)}>
-                  <DeleteIcon />
-                </IconButton>
-                <Button size="small" onClick={() => handleAdvancedEdit(strat.id)}>Avanzado</Button>
+                {!s.default && (
+                  <>
+                    <IconButton edge="end" aria-label="edit" onClick={() => handleEdit(strat)}>
+                      <EditIcon />
+                    </IconButton>
+                    <IconButton edge="end" aria-label="delete" onClick={() => handleDelete(strat.id)}>
+                      <DeleteIcon />
+                    </IconButton>
+                    <Button size="small" onClick={() => handleAdvancedEdit(strat.id)}>Avanzado</Button>
+                  </>
+                )}
               </>
             }>
               <ListItemText
-                primary={String(strat.name ?? strat.id)}
+                primary={`${String(strat.name ?? strat.id)}${s.default ? " (default)" : ""}`}
                 secondary={strat.symbol ? `Symbol: ${strat.symbol}` : "Rule-based"}
               />
             </ListItem>
