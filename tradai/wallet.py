@@ -18,8 +18,16 @@ class Wallet:
     def get_balances(self) -> Dict[str, float]:
         raise NotImplementedError
 
+    def get_balance(self, symbol: str) -> float:
+        """Devuelve el balance disponible para *symbol*."""
+        return self.get_balances().get(symbol.upper(), 0.0)
+
     def place_order(self, symbol: str, side: str, quantity: float) -> Dict:
         raise NotImplementedError
+
+    def balance_usdt(self) -> float:
+        """Acceso rápido al balance en USDT."""
+        return self.get_balance("USDT")
 
 
 class DemoWallet(Wallet):
@@ -31,6 +39,9 @@ class DemoWallet(Wallet):
 
     def get_balances(self) -> Dict[str, float]:
         return dict(self.balances)
+
+    def get_balance(self, symbol: str) -> float:
+        return self.balances.get(symbol.upper(), 0.0)
 
     def place_order(self, symbol: str, side: str, quantity: float) -> Dict:
         if side == "BUY":
@@ -58,6 +69,9 @@ class BinanceWallet(Wallet):
             if float(b.get("free", 0)) > 0
         }
         return balances
+
+    def get_balance(self, symbol: str) -> float:
+        return self.get_balances().get(symbol.upper(), 0.0)
 
     def place_order(self, symbol: str, side: str, quantity: float) -> Dict:
         order = self.client.create_order(
