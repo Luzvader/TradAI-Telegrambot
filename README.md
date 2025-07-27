@@ -67,6 +67,10 @@ npm run dev                  # => http://localhost:3000
 ```
 El proxy del `next.config.js` reenvía las peticiones `/api/*` al backend.
 
+Para servir el panel vía HTTPS usa `npm run dev:https`. Este comando requiere
+definir las variables `SSL_CRT_FILE` y `SSL_KEY_FILE` apuntando al certificado y
+clave privada generados por el backend en `~/.tradai_ssl/`.
+
 ### 4.3 Scripts npm
 
 Antes de usar `npm run dev` o `npm run lint`, instala las dependencias en
