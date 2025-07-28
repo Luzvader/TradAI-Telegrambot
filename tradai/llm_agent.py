@@ -103,7 +103,10 @@ def save_strategy(strategy: Dict, save_to_file: bool = True) -> None:
     except Exception as e:
         logger.error(f"Error al guardar estrategia en {STRATEGY_FILE}: {e}")
 
-@cachetools.cached(STRATEGY_CACHE, key=lambda prompt, model, max_tokens, temperature: f"{prompt}:{model}")
+@cachetools.cached(
+    STRATEGY_CACHE,
+    key=lambda *a, **kw: f"{a[0]}:{kw.get('model', 'gpt-3.5-turbo')}"
+)
 @retry((RateLimitError, APIError), tries=3, delay=2, backoff=2)
 def suggest_strategy(
     user_prompt: str,
@@ -186,8 +189,8 @@ def suggest_strategy(
         strategy = json.loads(content)
         if not validate_strategy_response(strategy):
             logger.error("Estrategia devuelta por el LLM no cumple con el formato esperado")
-            raise RuntimeError("Invalid strategy format")
-        logger.info(f"Estrategia generada exitosamente para símbolo: {strategy['symbol']}")
+        else:
+            logger.info(f"Estrategia generada exitosamente para símbolo: {strategy.get('symbol', 'N/A')}")
         save_strategy(strategy, save_to_file=save_to_file)
         return strategy
     except (json.JSONDecodeError, KeyError) as e:
