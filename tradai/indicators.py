@@ -12,47 +12,54 @@ class InsufficientDataError(Exception):
     pass
 
 def ema(values: Union[Iterable[float], Dict[str, Any]], period: int = 20) -> Optional[float]:
-    """Calcula la última EMA (*Exponential Moving Average*) de *period*."""
+    """Calcula la última EMA (*Exponential Moving Average*) de *period*.
+
+    Se utiliza el algoritmo estándar iniciando el cálculo desde los primeros
+    ``period`` valores. Si los datos son insuficientes se devuelve ``None``.
+    """
 
     try:
         if isinstance(values, dict):
             vals = [float(v["price"] if "price" in v else v["close"]) for v in values.get("data", [values])]
         else:
-            vals = [float(v) for v in values if isinstance(v, (int, float)) and v > 0]
+            vals = [float(v) for v in values]
 
         if len(vals) < period:
             logger.warning(f"Insuficientes datos para EMA ({len(vals)} < {period})")
-            raise InsufficientDataError(f"Need at least {period} data points for EMA")
+            return None
 
         k = 2 / (period + 1)
-        sma = np.mean(vals[-period:])
-        ema_prev = sma
-        for price in vals[-period + 1:]:
-            ema_prev = price * k + ema_prev * (1 - k)
-        return ema_prev
+        ema_val = float(np.mean(vals[:period]))
+        for price in vals[period:]:
+            ema_val = price * k + ema_val * (1 - k)
+        return ema_val
     except (TypeError, ValueError, KeyError) as e:
         logger.error(f"Error calculando EMA: {e}")
         return None
 
 def rsi(values: Union[Iterable[float], Dict[str, Any]], period: int = 14) -> Optional[float]:
-    """Calcula el último RSI (*Relative Strength Index*)."""
+    """Calcula el último RSI (*Relative Strength Index*) usando el método estándar."""
 
     try:
         if isinstance(values, dict):
             vals = [float(v["price"] if "price" in v else v["close"]) for v in values.get("data", [values])]
         else:
-            vals = [float(v) for v in values if isinstance(v, (int, float)) and v > 0]
+            vals = [float(v) for v in values]
 
         if len(vals) < period + 1:
             logger.warning(f"Insuficientes datos para RSI ({len(vals)} < {period + 1})")
-            raise InsufficientDataError(f"Need at least {period + 1} data points for RSI")
+            return None
 
         deltas = np.diff(vals)
-        gains = np.maximum(deltas, 0)
-        losses = np.maximum(-deltas, 0)
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
 
-        avg_gain = np.mean(gains[-period:])
-        avg_loss = np.mean(losses[-period:])
+        avg_gain = np.mean(gains[:period])
+        avg_loss = np.mean(losses[:period])
+
+        for i in range(period, len(gains)):
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
 
         if avg_loss == 0:
             logger.warning("RSI=100 debido a avg_loss=0 (condición de sobrecompra extrema)")
@@ -65,18 +72,18 @@ def rsi(values: Union[Iterable[float], Dict[str, Any]], period: int = 14) -> Opt
         logger.error(f"Error calculando RSI: {e}")
         return None
 
-def _ema_sequence(values: Sequence[float], period: int) -> List[float]:
-    """Devuelve la secuencia completa de EMAs para ``values``."""
+def _ema_sequence(values: Sequence[float], period: int) -> Optional[List[float]]:
+    """Devuelve la secuencia completa de EMAs para ``values`` usando el algoritmo estándar."""
     if len(values) < period:
         logger.warning(f"Insuficientes datos para secuencia EMA ({len(values)} < {period})")
-        return []
+        return None
 
     k = 2 / (period + 1)
-    sma = np.mean(values[-period:])
-    seq = [sma]
-    for price in values[-period + 1:]:
-        sma = price * k + sma * (1 - k)
-        seq.append(sma)
+    ema_val = float(np.mean(values[:period]))
+    seq = [ema_val]
+    for price in values[period:]:
+        ema_val = price * k + ema_val * (1 - k)
+        seq.append(ema_val)
     return seq
 
 def macd(
@@ -91,26 +98,28 @@ def macd(
         if isinstance(values, dict):
             vals = [float(v["price"] if "price" in v else v["close"]) for v in values.get("data", [values])]
         else:
-            vals = [float(v) for v in values if isinstance(v, (int, float)) and v > 0]
-
-        if len(vals) < long_period + signal_period:
-            logger.warning(f"Insuficientes datos para MACD ({len(vals)} < {long_period + signal_period})")
-            raise InsufficientDataError(f"Need at least {long_period + signal_period} data points for MACD")
+            vals = [float(v) for v in values]
 
         ema_short_seq = _ema_sequence(vals, short_period)
         ema_long_seq = _ema_sequence(vals, long_period)
-        if not ema_short_seq or not ema_long_seq:
+        if ema_short_seq is None or ema_long_seq is None:
             logger.warning("No se pudieron calcular secuencias EMA para MACD")
-            raise InsufficientDataError("Failed to compute EMA sequences for MACD")
+            return None
 
-        mlen = min(len(ema_short_seq), len(ema_long_seq))
-        ema_short_seq = ema_short_seq[-mlen:]
-        ema_long_seq = ema_long_seq[-mlen:]
-        macd_seq = [s - l for s, l in zip(ema_short_seq, ema_long_seq)]
+        start_short = len(vals) - len(ema_short_seq)
+        start_long = len(vals) - len(ema_long_seq)
+        start = max(start_short, start_long)
+
+        macd_seq = []
+        for i in range(start, len(vals)):
+            es = ema_short_seq[i - start_short]
+            el = ema_long_seq[i - start_long]
+            macd_seq.append(es - el)
+
         signal_seq = _ema_sequence(macd_seq, signal_period)
-        if not signal_seq:
+        if signal_seq is None:
             logger.warning("No se pudo calcular la línea de señal para MACD")
-            raise InsufficientDataError("Failed to compute signal line for MACD")
+            return None
         return macd_seq[-1], signal_seq[-1]
     except (TypeError, ValueError, KeyError) as e:
         logger.error(f"Error calculando MACD: {e}")
@@ -130,27 +139,28 @@ def atr(
             l = [float(v["low"]) for v in lows.get("data", [lows])]
             c = [float(v["close"] if "close" in v else v["price"]) for v in closes.get("data", [closes])]
         else:
-            h = [float(v) for v in highs if isinstance(v, (int, float)) and v > 0]
-            l = [float(v) for v in lows if isinstance(v, (int, float)) and v > 0]
-            c = [float(v) for v in closes if isinstance(v, (int, float)) and v > 0]
+            h = [float(v) for v in highs]
+            l = [float(v) for v in lows]
+            c = [float(v) for v in closes]
 
         if len(h) != len(l) or len(l) != len(c):
             logger.error("Las listas de highs, lows y closes no están sincronizadas")
             raise ValueError("Highs, lows, and closes must have the same length")
-        if len(h) < period + 1:
-            logger.warning(f"Insuficientes datos para ATR ({len(h)} < {period + 1})")
-            raise InsufficientDataError(f"Need at least {period + 1} data points for ATR")
+        if len(h) < period:
+            logger.warning(f"Insuficientes datos para ATR ({len(h)} < {period})")
+            return None
 
         for i in range(len(h)):
             if h[i] < l[i]:
                 logger.error(f"High ({h[i]}) menor que low ({l[i]}) en índice {i}")
                 raise ValueError("High price cannot be less than low price")
 
-        # Optimización de cálculo de ATR usando numpy
-        trs = np.maximum(h[-period:] - l[-period:], 
-                         np.abs(h[-period:] - c[-period-1:-1]), 
-                         np.abs(l[-period:] - c[-period-1:-1]))
-        return np.mean(trs)
+        trs = []
+        for i in range(len(h)):
+            prev_close = c[i-1] if i > 0 else c[i]
+            tr = max(h[i] - l[i], abs(h[i] - prev_close), abs(l[i] - prev_close))
+            trs.append(tr)
+        return float(np.mean(trs[-period:]))
     except (TypeError, ValueError, KeyError, IndexError) as e:
         logger.error(f"Error calculando ATR: {e}")
         return None
