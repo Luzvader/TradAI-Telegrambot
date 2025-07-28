@@ -7,3 +7,4 @@ openai>=1.0
 cryptography>=45.0
 scikit-learn>=1.4
 pandas>=2.2
+cachetools>=5.0
