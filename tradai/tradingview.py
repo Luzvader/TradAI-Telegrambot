@@ -125,7 +125,7 @@ class TradingViewClient:
                     return {}
 
         except (error.URLError, error.HTTPError) as exc:
-            logging.error("Error de conexión con TradingView: %s", str(exc))
+            logging.warning("Error de conexión con TradingView: %s", str(exc))
             return {}
         except json.JSONDecodeError as exc:
             logging.error("Error al decodificar la respuesta de TradingView: %s", str(exc))
