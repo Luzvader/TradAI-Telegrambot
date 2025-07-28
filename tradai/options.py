@@ -16,9 +16,14 @@ OPTIONS_FILE = ROOT_DIR / "options.xml"
 FILE_LOCK = threading.Lock()
 
 def get_openai_api_key(options: Dict[str, str]) -> str:
-    """Get the OpenAI API key from options or environment variable."""
+    """Get the OpenAI API key from options or environment variable.
+
+    Accepts ``openai_api_key`` or ``openai_key`` as valid keys.
+    """
     if "openai_api_key" in options:
         return options["openai_api_key"]
+    if "openai_key" in options:
+        return options["openai_key"]
     
     # Fallback to environment variable if not found in options
     api_key = os.getenv("OPENAI_API_KEY")
@@ -27,8 +32,8 @@ def get_openai_api_key(options: Dict[str, str]) -> str:
         return api_key
     
     # If not found, raise an error
-    logger.error("No se encontró 'openai_api_key' en XML ni en variable de entorno")
-    raise ValueError("Missing 'openai_api_key' in configuration")
+    logger.error("No se encontró 'openai_api_key' o 'openai_key' en XML ni en variable de entorno")
+    raise ValueError("Missing OpenAI API key in configuration")
 
 def load_options() -> Dict[str, str]:
     """Load options from ``OPTIONS_FILE`` returning a mapping.
@@ -38,7 +43,8 @@ def load_options() -> Dict[str, str]:
         Empty dict if file doesn't exist, is malformed, or missing mandatory keys.
 
     Notes:
-        - Validates that the XML root is 'options' and contains 'openai_api_key'.
+        - Validates that the XML root is 'options' and contains
+          either 'openai_api_key' or 'openai_key'.
         - Falls back to environment variable OPENAI_API_KEY if not in XML.
     """
     if not OPTIONS_FILE.exists():
