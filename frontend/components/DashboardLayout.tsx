@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { Box, Button, Stack, Grid } from "@mui/material";
 import WidgetFrame from "./WidgetFrame";
 import { DEFAULT_WIDGETS, WidgetConfig } from "../widgets/widgetConfig";
-import TVChartWidget from "./TVChartWidget";
 
 export default function DashboardLayout() {
   const [widgets, setWidgets] = useState<WidgetConfig[]>(DEFAULT_WIDGETS);
@@ -61,67 +60,43 @@ export default function DashboardLayout() {
         minHeight: 0, // Allow this container to shrink
         overflow: 'hidden' // Prevent main container from scrolling
       }}>
-        {/* Top section - Other widgets (45% of available height) */}
-        <Box sx={{ 
-          flex: '0 0 auto', // Changed to auto to fit content
+        <Box sx={{
+          flex: '1 1 auto',
           mb: 2,
-          minHeight: 0, // Allow this container to shrink
+          minHeight: 0,
           '& .MuiGrid-container': {
-            height: 'auto',
+            height: '100%',
             alignItems: 'stretch',
-            margin: 0, // Remove default grid spacing
-            width: '100%' // Ensure grid takes full width
+            margin: 0,
+            width: '100%'
           },
           '& .MuiGrid-item': {
             display: 'flex',
             flexDirection: 'column',
             padding: '8px',
             boxSizing: 'border-box',
-            minHeight: 0, // Allow grid items to shrink below content size
-            height: 'auto' // Allow items to determine their own height
+            minHeight: 0,
+            height: 'auto'
           }
         }}>
           <Grid container spacing={2}>
             {widgets
-              .filter(w => w.visible && w.key !== 'chart')
+              .filter((w) => w.visible)
               .map((w) => (
                 <Grid
                   key={w.key}
                   item
                   xs={12}
                   sm={6}
-                  md={4}
+                  md={w.cols}
                   lg={w.cols}
                   xl={w.cols}
                 >
-                  <WidgetFrame title={w.name}>
-                    {w.component}
-                  </WidgetFrame>
+                  <WidgetFrame title={w.name}>{w.component}</WidgetFrame>
                 </Grid>
               ))}
           </Grid>
         </Box>
-        
-        {/* Bottom section - TradingView widget (55% of available height) */}
-        {widgets.some(w => w.visible && w.key === 'chart') && (
-          <Box sx={{ 
-            flex: '1 1 auto', // Changed to auto to fit content
-            mt: 2,
-            minHeight: '300px',
-            display: 'flex',
-            flexDirection: 'column',
-            '& > div': {
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              minHeight: 0 // Allow this container to shrink below content size
-            }
-          }}>
-            <WidgetFrame title="Market Chart">
-              <TVChartWidget />
-            </WidgetFrame>
-          </Box>
-        )}
       </Box>
     </Box>
   );
