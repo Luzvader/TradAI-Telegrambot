@@ -4,6 +4,7 @@ import PricesWidget from "../components/PricesWidget";
 import TVChartWidget from "../components/TVChartWidget";
 import StrategiesWidget from "../components/StrategiesWidget";
 import ChatWidget from "../components/ChatWidget";
+import NewsFeedWidget from "../components/NewsFeedWidget";
 
 export interface WidgetConfig {
   key: string;
@@ -45,10 +46,17 @@ export const DEFAULT_WIDGETS: WidgetConfig[] = [
     visible: true,
   },
   {
+    key: "news",
+    name: "News Feed",
+    component: <NewsFeedWidget />,
+    cols: 3,
+    visible: true,
+  },
+  {
     key: "chart",
     name: "Market Chart",
     component: <TVChartWidget />,
-    cols: 12,
+    cols: 9,
     height: 500,
     visible: true,
   },
