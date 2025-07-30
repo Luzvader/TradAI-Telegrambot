@@ -33,10 +33,14 @@ Write-Section "Dependencias Python"
 # 3. Dependencias frontend
 Write-Section "Dependencias Frontend (npm)"
 $frontendDir = Join-Path $PSScriptRoot "frontend"
-# Bypass ExecutionPolicy solo para el proceso actual (ya está si se ejecuta con Bypass)
 Push-Location $frontendDir
-if (!(Test-Path "node_modules")) {
-    & npm.cmd install
+# Detectar si npm está disponible
+$npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+if (-not $npm) { $npm = Get-Command npm -ErrorAction SilentlyContinue }
+if (-not $npm) {
+    Write-Host "npm no está instalado o no está en PATH. Omite instalación de dependencias frontend. Descarga Node.js de https://nodejs.org/ si quieres usar la interfaz web." -ForegroundColor Yellow
+} elseif (!(Test-Path "node_modules")) {
+    & $npm install
 } else {
     Write-Host "node_modules ya existe, omitiendo npm install"
 }
