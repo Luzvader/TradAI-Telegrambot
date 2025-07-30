@@ -69,6 +69,37 @@ def stop_process(proc: subprocess.Popen | None) -> None:
 def main() -> None:  # noqa: D401
     global backend_proc, frontend_proc
 
+    # Warn if not using project venv
+    venv_path = ROOT / ".venv"
+    if venv_path.exists():
+        venv_bin = venv_path / ("Scripts" if os.name == "nt" else "bin")
+        venv_python = venv_bin / ("python.exe" if os.name == "nt" else "python")
+        running_python = Path(sys.executable).resolve()
+        if venv_python.exists() and running_python != venv_python.resolve():
+            print(f"[ADVERTENCIA] No estás usando el entorno virtual del proyecto: {venv_python}\nActualmente usas: {running_python}\nActiva el entorno con:\n  .venv\\Scripts\\activate   # CMD\n  .venv\\Scripts\\Activate.ps1   # PowerShell\n  source .venv/bin/activate   # Bash\n")
+
+    # Check Python backend dependencies
+    try:
+        import pkg_resources
+        req_path = ROOT / "requirements.txt"
+        if req_path.exists():
+            with open(req_path) as reqf:
+                reqs = [line for line in reqf.read().splitlines() if line.strip() and not line.strip().startswith('#')]
+            pkg_resources.require(reqs)
+    except (ImportError, pkg_resources.DistributionNotFound, pkg_resources.VersionConflict) as e:
+        print(f"[ERROR] Dependencias Python no satisfechas: {e}\nEjecuta 'pip install -r requirements.txt' antes de iniciar.")
+        sys.exit(1)
+
+    # Check Node.js frontend dependencies
+    node_modules = FRONTEND_DIR / "node_modules"
+    package_json = FRONTEND_DIR / "package.json"
+    if package_json.exists() and not node_modules.exists():
+        print("[ERROR] Dependencias de frontend no instaladas. Ejecuta 'cd frontend && npm install' antes de iniciar.")
+        sys.exit(1)
+    if not package_json.exists():
+        print("[ERROR] No se encontró package.json en el frontend. Verifica la estructura del proyecto.")
+        sys.exit(1)
+
     print("Starting TradAI backend...")
     backend_proc = start_process(BACKEND_CMD, extra_env={"TRADAI_HTTP": "1"})
 
