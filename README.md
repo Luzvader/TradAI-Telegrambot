@@ -28,22 +28,42 @@ TradAI permite consultar precios en tiempo real, crear/gestionar estrategias y e
 
 ## 3. Instalación desde cero
 
-```bash
-# 1) Clona el proyecto (o descarga el ZIP)
-git clone https://github.com/tuusuario/tradai.git
-cd tradai
+1. Clona el proyecto (o descarga el ZIP)
 
-# 2) Backend – entorno virtual y dependencias
-python -m venv .venv
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
-# macOS/Linux
-source .venv/bin/activate
-pip install -r requirements.txt
+   ```bash
+   git clone https://github.com/tuusuario/tradai.git
+   cd tradai
+   ```
 
-# 3) Frontend – dependencias npm
-npm install
-```
+2. Prepara el backend en un entorno virtual de Python
+
+   ```bash
+   python -m venv .venv
+   # Windows PowerShell
+   .venv\Scripts\Activate.ps1
+   # macOS/Linux
+   source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+3. Instala las dependencias del frontend
+
+   ```bash
+   npm install
+   ```
+
+   En Windows puedes ejecutar `setup.ps1` para automatizar estos pasos:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File setup.ps1
+   ```
+
+4. Inicia backend y frontend juntos con:
+
+   ```bash
+   python start.py
+   ```
+
 
 ---
 
