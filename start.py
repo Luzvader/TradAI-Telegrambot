@@ -81,14 +81,32 @@ def main() -> None:  # noqa: D401
     # Check Python backend dependencies
     try:
         import pkg_resources
-        req_path = ROOT / "requirements.txt"
-        if req_path.exists():
-            with open(req_path) as reqf:
-                reqs = [line for line in reqf.read().splitlines() if line.strip() and not line.strip().startswith('#')]
+    except ImportError:  # setuptools may faltar, usa el vendor de pip
+        try:
+            from pip._vendor import pkg_resources  # type: ignore
+        except Exception:
+            print(
+                "[ERROR] No se pudo comprobar dependencias de Python. "
+                "Instala 'setuptools' con 'pip install setuptools'."
+            )
+            sys.exit(1)
+
+    req_path = ROOT / "requirements.txt"
+    if req_path.exists():
+        with open(req_path) as reqf:
+            reqs = [
+                line
+                for line in reqf.read().splitlines()
+                if line.strip() and not line.strip().startswith("#")
+            ]
+        try:
             pkg_resources.require(reqs)
-    except (ImportError, pkg_resources.DistributionNotFound, pkg_resources.VersionConflict) as e:
-        print(f"[ERROR] Dependencias Python no satisfechas: {e}\nEjecuta 'pip install -r requirements.txt' antes de iniciar.")
-        sys.exit(1)
+        except (pkg_resources.DistributionNotFound, pkg_resources.VersionConflict) as e:
+            print(
+                f"[ERROR] Dependencias Python no satisfechas: {e}\n"
+                "Ejecuta 'pip install -r requirements.txt' antes de iniciar."
+            )
+            sys.exit(1)
 
     # Check Node.js frontend dependencies
     node_modules = FRONTEND_DIR / "node_modules"
