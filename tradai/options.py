@@ -72,8 +72,11 @@ def load_options() -> Dict[str, str]:
                 continue
             options[key] = value_elem.text or ""
 
-        # Validate and return API key
-        get_openai_api_key(options)
+        # Validate API key if present but don't abort if missing
+        try:
+            get_openai_api_key(options)
+        except ValueError as e:
+            logger.error(f"Error de validación: {e}")
         logger.info(f"Opciones cargadas desde {OPTIONS_FILE}: {list(options.keys())}")
         return options
 

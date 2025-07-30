@@ -9,3 +9,4 @@ scikit-learn>=1.4
 pandas>=2.2
 cachetools>=5.0
 retry>=0.9
+setuptools>=68
