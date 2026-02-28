@@ -1,0 +1,35 @@
+{% if portfolio and portfolio.positions %}
+<table>
+    <thead>
+        <tr>
+            <th>Ticker</th>
+            <th>Mercado</th>
+            <th>Sector</th>
+            <th>Acciones</th>
+            <th>Precio medio</th>
+            <th>Precio actual</th>
+            <th>Valor</th>
+            <th>P&L</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in portfolio.positions %}
+        <tr>
+            <td><strong>{{ p.ticker }}</strong></td>
+            <td>{{ p.market }}</td>
+            <td>{{ p.sector }}</td>
+            <td>{{ "{:.2f}".format(p.shares) }}</td>
+            <td>${{ "{:.2f}".format(p.avg_price) }}</td>
+            <td>${{ "{:.2f}".format(p.current_price or 0) }}</td>
+            <td>${{ "{:,.2f}".format(p.value) }}</td>
+            <td class="{{ 'positive' if p.pnl_pct >= 0 else 'negative' }}">
+                {{ "{:+.2f}".format(p.pnl_pct) }}%
+                <br><small>${{ "{:+,.2f}".format(p.pnl_abs) }}</small>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty">Sin posiciones abiertas</div>
+{% endif %}
