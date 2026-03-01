@@ -34,7 +34,7 @@ from config.settings import TIMEZONE
 from data.market_data import refresh_broker_prices
 from data.news import save_context_snapshot
 from database import repository as repo
-from database.models import AutoModeType, PortfolioType
+from database.models import AutoModeType, OperationOrigin, PortfolioType
 from portfolio.portfolio_manager import (
     check_alerts,
     execute_buy,
@@ -189,6 +189,36 @@ async def _auto_scan(portfolio_id: int, mode: AutoModeType) -> None:
         if not strong:
             return
 
+        # ── Persistir análisis de scan para aprendizaje ──
+        for opp in strong:
+            try:
+                from database.models import AnalysisLog
+                reasoning_list = opp.get("reasoning", [])
+                reasoning_text = "\n".join(reasoning_list) if isinstance(reasoning_list, list) else str(reasoning_list)
+                log = AnalysisLog(
+                    ticker=opp.get("ticker", ""),
+                    market=opp.get("market", "NASDAQ"),
+                    strategy_used=str(opp.get("strategy", "")),
+                    signal=opp.get("signal", "BUY"),
+                    overall_score=opp.get("overall_score"),
+                    value_score=opp.get("value_score"),
+                    quality_score=opp.get("quality_score"),
+                    safety_score=opp.get("safety_score"),
+                    price_at_analysis=opp.get("price"),
+                    margin_of_safety=opp.get("margin_of_safety"),
+                    pe_ratio=opp.get("pe_ratio"),
+                    roe=opp.get("roe"),
+                    debt_to_equity=opp.get("debt_to_equity"),
+                    dividend_yield=opp.get("dividend_yield"),
+                    reasoning=reasoning_text,
+                    tech_summary=opp.get("tech_summary", ""),
+                    price_summary=opp.get("price_summary", ""),
+                    source="auto",
+                )
+                await repo.save_analysis_log(log)
+            except Exception as e:
+                logger.debug(f"Error guardando análisis auto de {opp.get('ticker')}: {e}")
+
         mode_label = "🟢 ON" if mode == AutoModeType.ON else "🛡️ SAFE"
         text = f"🤖 *MODO AUTO ({mode_label}) — Oportunidades detectadas*\n\n"
         for i, opp in enumerate(strong, 1):
@@ -333,6 +363,7 @@ async def _auto_execute_buy(portfolio_id: int, signal: dict) -> None:
             market=market,
             price=price,
             shares=shares,
+            origin=OperationOrigin.AUTO,
         )
 
         if result["success"]:
@@ -375,6 +406,7 @@ async def _auto_execute_sell(portfolio_id: int, signal: dict) -> None:
             market=market,
             price=price,
             shares_to_sell=position.shares,  # Venta total
+            origin=OperationOrigin.AUTO,
         )
 
         if result["success"]:

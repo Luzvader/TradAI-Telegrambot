@@ -85,7 +85,7 @@ async def analyze_ticker(
     if TRADING212_ANALYSIS_ORIENTED:
         try:
             from broker.bridge import get_trading212_tradability
-            broker_tradability = await get_trading212_tradability(ticker)
+            broker_tradability = await get_trading212_tradability(ticker, resolved_market)
         except Exception as e:
             logger.debug(f"No se pudo validar {ticker} en Trading212: {e}")
             broker_tradability = {"tradable": None, "reason": str(e)}

@@ -60,7 +60,9 @@ async def scan_opportunities(
             try:
                 from broker.bridge import get_trading212_tradability
 
-                broker_tradability = await get_trading212_tradability(vs.ticker)
+                broker_tradability = await get_trading212_tradability(
+                    vs.ticker, detected_market
+                )
                 if broker_tradability.get("tradable") is False:
                     logger.debug(
                         f"Omitiendo {vs.ticker} en scan: no operable en Trading212"

@@ -158,6 +158,24 @@ def init_scheduler(telegram_bot: Bot | None = None) -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # ── Cada domingo a las 19:00: validar precisión de señales antiguas ──
+    scheduler.add_job(
+        job_validate_signal_accuracy,
+        CronTrigger(day_of_week="sun", hour=19, minute=0),
+        id="validate_signals",
+        name="Validar señales",
+        replace_existing=True,
+    )
+
+    # ── Cada sábado a las 10:00: análisis de tendencias de snapshots ──
+    scheduler.add_job(
+        job_snapshot_trend_analysis,
+        CronTrigger(day_of_week="sat", hour=10, minute=0),
+        id="snapshot_trends",
+        name="Análisis de tendencias",
+        replace_existing=True,
+    )
+
     # ── Backtest continuo en cartera demo (sin supervisión) ──
     if BACKTEST_CONTINUOUS_ENABLED:
         scheduler.add_job(
@@ -785,3 +803,153 @@ async def job_check_earnings_calendar() -> None:
     text += "\n_Usa_ `/earnings TICKER` _para ver historial completo_"
     await _notify(text)
     logger.info(f"📅 Earnings check: {len(imminent)} próximos notificados")
+
+
+# ── Validación de señales ────────────────────────────────────
+
+
+async def job_validate_signal_accuracy() -> None:
+    """
+    Valida señales BUY/SELL emitidas hace 30-120 días:
+    compara el precio de entonces con el actual y genera un
+    LearningLog por cada señal evaluada.  Esto cierra el bucle
+    de retroalimentación entre generación de señales y resultados.
+    """
+    from ai.learning import validate_signal_accuracy
+    from datetime import UTC
+
+    logger.info("🎯 Validando precisión de señales antiguas…")
+
+    try:
+        signals = await repo.get_old_signals_for_validation(
+            min_age_days=30, max_age_days=120, limit=20
+        )
+    except Exception as e:
+        logger.error(f"Error obteniendo señales para validar: {e}")
+        return
+
+    if not signals:
+        logger.info("🎯 Sin señales pendientes de validar")
+        return
+
+    validated = 0
+    correct = 0
+    total_pct = 0.0
+
+    for sig in signals:
+        try:
+            current = await get_current_price(sig.ticker, sig.market)
+            if current is None or sig.price is None or sig.price <= 0:
+                continue
+
+            days = (datetime.now(UTC) - sig.created_at).days if sig.created_at else 30
+
+            log = await validate_signal_accuracy(
+                signal_id=sig.id,
+                ticker=sig.ticker,
+                signal_type=sig.signal_type.value,
+                signal_score=sig.value_score,
+                signal_price=sig.price,
+                current_price=current,
+                days_elapsed=days,
+            )
+            if log:
+                validated += 1
+                if log.outcome == "win":
+                    correct += 1
+                total_pct += log.profit_pct or 0
+        except Exception as e:
+            logger.debug(f"Error validando señal {sig.id} ({sig.ticker}): {e}")
+
+    if validated > 0:
+        accuracy = correct / validated * 100
+        avg_pct = total_pct / validated
+        text = (
+            f"🎯 *VALIDACIÓN DE SEÑALES*\n\n"
+            f"📊 {validated} señales evaluadas (30-120 días)\n"
+            f"✅ Precisión: {accuracy:.0f}% ({correct}/{validated})\n"
+            f"📈 Movimiento medio: {avg_pct:+.1f}%\n\n"
+            f"_Datos incorporados al motor de aprendizaje._"
+        )
+        await _notify(text)
+        logger.info(
+            f"🎯 {validated} señales validadas: "
+            f"precisión {accuracy:.0f}%, avg {avg_pct:+.1f}%"
+        )
+
+
+# ── Análisis de tendencias de snapshots ──────────────────────
+
+
+async def job_snapshot_trend_analysis() -> None:
+    """
+    Analiza tendencias de los snapshots del portfolio:
+    drawdown, recovery, rolling performance, alpha vs benchmark.
+    Genera un LearningLog con las conclusiones.
+    """
+    from ai.analyst import _call_llm
+
+    real = await repo.get_portfolio_by_type(PortfolioType.REAL)
+    if real is None:
+        return
+
+    snapshots = await repo.get_portfolio_snapshots(real.id, limit=30)
+    if len(snapshots) < 7:
+        return
+
+    logger.info("📊 Analizando tendencias de snapshots…")
+
+    # Calcular métricas de la serie
+    snaps = list(reversed(list(snapshots)))  # cronológico
+    values = [s.total_value for s in snaps if s.total_value]
+    benchmarks = [s.benchmark_value for s in snaps if s.benchmark_value]
+    pnl_series = [s.pnl_pct for s in snaps if s.pnl_pct is not None]
+
+    if len(values) < 7:
+        return
+
+    # Drawdown actual
+    peak = max(values)
+    current_value = values[-1]
+    drawdown = ((current_value - peak) / peak * 100) if peak > 0 else 0
+
+    # Rendimiento semanal
+    week_return = ((values[-1] - values[-7]) / values[-7] * 100) if len(values) >= 7 and values[-7] > 0 else 0
+
+    # Alpha vs benchmark
+    alpha_str = ""
+    if len(benchmarks) >= 7:
+        bench_return = ((benchmarks[-1] - benchmarks[-7]) / benchmarks[-7] * 100) if benchmarks[-7] > 0 else 0
+        alpha = week_return - bench_return
+        alpha_str = f"\nAlpha semanal vs SPY: {alpha:+.1f}% (portfolio: {week_return:+.1f}%, SPY: {bench_return:+.1f}%)"
+
+    # Construir serie resumida para el LLM
+    series_str = "\n".join(
+        f"  {s.snapshot_date.strftime('%d/%m') if hasattr(s.snapshot_date, 'strftime') else '?'}: "
+        f"{s.total_value:,.0f}$ (PnL: {s.pnl_pct or 0:+.1f}%)"
+        for s in snaps[-14:]  # últimos 14 días
+    )
+
+    prompt = f"""Análisis de tendencia del portfolio (últimos {len(snaps)} días):
+Valor actual: {current_value:,.0f}$ | Pico: {peak:,.0f}$ | Drawdown: {drawdown:+.1f}%
+Rendimiento semanal: {week_return:+.1f}%{alpha_str}
+
+Últimos 14 días:
+{series_str}
+
+En 2-3 frases: ¿estamos en drawdown o recuperación?, ¿el rendimiento mejora o empeora?,
+recomendación para ajustar agresividad del auto-mode.
+"""
+    analysis = await _call_llm(prompt, max_tokens=200)
+
+    text = (
+        f"📊 *ANÁLISIS DE TENDENCIAS*\n\n"
+        f"💰 Valor: {current_value:,.0f}$ | Pico: {peak:,.0f}$\n"
+        f"📉 Drawdown: {drawdown:+.1f}% | Semanal: {week_return:+.1f}%\n"
+    )
+    if alpha_str:
+        text += f"📈 {alpha_str.strip()}\n"
+    text += f"\n🧠 {analysis}\n\n_Análisis incorporado al aprendizaje._"
+    await _notify(text)
+    logger.info(f"📊 Análisis de tendencias completado (drawdown: {drawdown:+.1f}%)")
+

@@ -12,7 +12,7 @@ from backtesting.engine import BacktestConfig, run_backtest
 from data.insiders import get_insider_activity, format_insider_report
 from data.ticker_discovery import get_etf_tickers, get_etf_categories
 from database import repository as repo
-from database.models import PortfolioType, StrategyType
+from database.models import AnalysisLog, PortfolioType, StrategyType
 from signals.signal_engine import analyze_ticker, scan_opportunities
 from strategy.correlation import portfolio_correlation, format_correlation_report
 from strategy.screener import quick_scan
@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 async def cmd_analizar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Comando /analizar TICKER — análisis completo según estrategia activa.
+    Muestra un resumen compacto al usuario y almacena el análisis completo
+    en la BD para que el motor de aprendizaje pueda utilizarlo.
     Ejemplo: /analizar AAPL
     """
     args = context.args or []
@@ -44,70 +46,117 @@ async def cmd_analizar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     resolved_ticker = analysis.get("ticker", ticker)
     resolved_market = analysis.get("market")
 
-    strategy = str(analysis.get("strategy", "value")).upper()
-    market_str = f" ({resolved_market})" if resolved_market else ""
-    text = f"📊 *ANÁLISIS {strategy} — ${resolved_ticker}{market_str}*\n\n"
-    text += f"Empresa: {analysis.get('name', 'N/A')}\n"
-    text += f"Sector: {analysis.get('sector', 'N/A')}\n"
-    text += f"Precio: {analysis.get('price', 'N/A')}$\n\n"
-
-    tradability = analysis.get("broker_tradability") or {}
-    if "tradable" in tradability:
-        if tradability.get("tradable") is True:
-            text += "🏦 Trading212: ✅ Operable\n\n"
-        elif tradability.get("tradable") is False:
-            reason = tradability.get("reason", "No disponible")
-            text += f"🏦 Trading212: ❌ No operable ({reason})\n\n"
-        else:
-            reason = tradability.get("reason", "Sin verificación")
-            text += f"🏦 Trading212: ⚪ Verificación pendiente ({reason})\n\n"
-
-    emoji = (
-        "🟢" if analysis["signal"] == "BUY"
-        else "🔴" if analysis["signal"] == "SELL"
-        else "🟡"
-    )
-    text += f"*Señal: {emoji} {analysis['signal']}*\n"
-    text += f"Score: {analysis['overall_score']:.0f}/100\n"
-    text += (
-        f"  Value: {analysis['value_score']:.0f} | "
-        f"Quality: {analysis['quality_score']:.0f} | "
-        f"Safety: {analysis['safety_score']:.0f}\n\n"
-    )
-
-    if analysis.get("margin_of_safety") is not None:
-        text += f"Margen de seguridad: {analysis['margin_of_safety']:.1f}%\n"
-    if analysis.get("pe_ratio"):
-        text += f"P/E: {analysis['pe_ratio']:.1f}\n"
-    if analysis.get("roe"):
-        text += f"ROE: {analysis['roe'] * 100:.1f}%\n"
-    if analysis.get("debt_to_equity"):
-        text += f"Deuda/Equity: {analysis['debt_to_equity']:.0f}%\n"
-
-    text += "\n*Razonamiento:*\n"
-    for r in analysis.get("reasoning", []):
-        text += f"  • {r}\n"
-
-    # Diagnósticos deterministas (técnico + valoración)
-    if analysis.get("tech_summary"):
-        text += f"\n📉 *Técnico:* {analysis['tech_summary']}\n"
-    if analysis.get("price_summary"):
-        text += f"💲 *Valoración:* {analysis['price_summary']}\n"
-
+    # ── IA analysis (obtenerlo antes de construir mensaje) ───
+    ai_analysis_text = ""
     try:
         det_ctx = analysis.get("deterministic_context", "")
-        ai_analysis = await analyze_with_context(
-            resolved_ticker, resolved_market, analysis, deterministic_context=det_ctx,
-        )
-        if ai_analysis and not ai_analysis.startswith("⚠️"):
-            text += f"\n🧠 *Análisis IA:*\n{ai_analysis}"
-        elif ai_analysis:
-            text += f"\n🧠 *Análisis IA:* {ai_analysis}"
-        else:
-            text += "\n🧠 *Análisis IA:* _No disponible en este momento_"
+        ai_analysis_text = await analyze_with_context(
+            resolved_ticker, resolved_market, analysis,
+            deterministic_context=det_ctx,
+        ) or ""
     except Exception as e:
         logger.warning(f"Error en análisis IA: {e}")
-        text += "\n🧠 *Análisis IA:* _Error al generar análisis_"
+
+    # ── Persistir análisis completo para el motor de aprendizaje ──
+    try:
+        reasoning_list = analysis.get("reasoning", [])
+        reasoning_text = "\n".join(reasoning_list) if isinstance(reasoning_list, list) else str(reasoning_list)
+
+        tradability = analysis.get("broker_tradability") or {}
+        broker_tradable = tradability.get("tradable")
+
+        log = AnalysisLog(
+            ticker=resolved_ticker,
+            market=resolved_market or "NASDAQ",
+            strategy_used=str(analysis.get("strategy", "")),
+            signal=analysis.get("signal", "HOLD"),
+            overall_score=analysis.get("overall_score"),
+            value_score=analysis.get("value_score"),
+            quality_score=analysis.get("quality_score"),
+            safety_score=analysis.get("safety_score"),
+            price_at_analysis=analysis.get("price"),
+            margin_of_safety=analysis.get("margin_of_safety"),
+            pe_ratio=analysis.get("pe_ratio"),
+            roe=analysis.get("roe"),
+            debt_to_equity=analysis.get("debt_to_equity"),
+            dividend_yield=analysis.get("dividend_yield"),
+            reasoning=reasoning_text,
+            tech_summary=analysis.get("tech_summary", ""),
+            price_summary=analysis.get("price_summary", ""),
+            ai_analysis=ai_analysis_text if ai_analysis_text and not ai_analysis_text.startswith("⚠️") else None,
+            broker_tradable=broker_tradable,
+            deterministic_context=analysis.get("deterministic_context", ""),
+            source="manual",
+        )
+        await repo.save_analysis_log(log)
+        logger.info(f"💾 Análisis de {resolved_ticker} guardado (id={log.id})")
+    except Exception as e:
+        logger.warning(f"Error guardando análisis de {resolved_ticker}: {e}")
+
+    # ── Construir resumen compacto para Telegram ──────────────
+    signal = analysis.get("signal", "HOLD")
+    emoji = "🟢" if signal == "BUY" else "🔴" if signal == "SELL" else "🟡"
+    strategy = str(analysis.get("strategy", "value")).upper()
+    market_str = f" ({resolved_market})" if resolved_market else ""
+    price = analysis.get("price")
+    price_str = f"{price:.2f}$" if price else "N/A"
+
+    text = f"{emoji} *${resolved_ticker}*{market_str} — {price_str}\n"
+    text += f"Señal: *{signal}* | Score: *{analysis.get('overall_score', 0):.0f}*/100\n"
+
+    # Scores desglosados en una línea
+    text += (
+        f"V:{analysis.get('value_score', 0):.0f} "
+        f"Q:{analysis.get('quality_score', 0):.0f} "
+        f"S:{analysis.get('safety_score', 0):.0f} "
+        f"| {strategy}\n"
+    )
+
+    # Métricas clave (solo si existen), formato compacto
+    metrics_parts = []
+    if analysis.get("margin_of_safety") is not None:
+        metrics_parts.append(f"MoS {analysis['margin_of_safety']:.1f}%")
+    if analysis.get("pe_ratio"):
+        metrics_parts.append(f"P/E {analysis['pe_ratio']:.1f}")
+    if analysis.get("roe"):
+        metrics_parts.append(f"ROE {analysis['roe'] * 100:.1f}%")
+    if analysis.get("debt_to_equity"):
+        metrics_parts.append(f"D/E {analysis['debt_to_equity']:.0f}%")
+    if metrics_parts:
+        text += " | ".join(metrics_parts) + "\n"
+
+    # Trading212 tradabilidad (una línea)
+    tradability = analysis.get("broker_tradability") or {}
+    if tradability.get("tradable") is True:
+        text += "🏦 T212: ✅ Operable\n"
+    elif tradability.get("tradable") is False:
+        text += f"🏦 T212: ❌ {tradability.get('reason', 'No disponible')}\n"
+
+    # Resumen técnico + valoración (compactos)
+    if analysis.get("tech_summary"):
+        text += f"📉 {analysis['tech_summary']}\n"
+    if analysis.get("price_summary"):
+        text += f"💲 {analysis['price_summary']}\n"
+
+    # Razonamiento: máximo 3 puntos clave
+    reasoning = analysis.get("reasoning", [])
+    if reasoning:
+        text += "\n"
+        for r in reasoning[:3]:
+            text += f"• {r}\n"
+        if len(reasoning) > 3:
+            text += f"_+{len(reasoning) - 3} más_\n"
+
+    # IA (recortada si es muy larga)
+    if ai_analysis_text and not ai_analysis_text.startswith("⚠️"):
+        short_ai = ai_analysis_text[:500]
+        if len(ai_analysis_text) > 500:
+            short_ai += "…"
+        text += f"\n🧠 *IA:*\n{short_ai}"
+    elif ai_analysis_text:
+        text += f"\n🧠 {ai_analysis_text}"
+    else:
+        text += "\n🧠 _IA no disponible_"
 
     await _send_long(update, text)
 
@@ -152,6 +201,27 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text += "\n"
 
     await _send_long(update, text)
+
+    # Persistir las oportunidades como AnalysisLog para el motor de aprendizaje
+    for opp in opportunities:
+        try:
+            await repo.save_analysis_log(AnalysisLog(
+                ticker=opp["ticker"],
+                source="scan",
+                signal_type=opp.get("signal", "BUY"),
+                score=opp.get("overall_score"),
+                summary=opp.get("justification", "")[:500],
+                raw_json={
+                    "value_score": opp.get("value_score"),
+                    "quality_score": opp.get("quality_score"),
+                    "safety_score": opp.get("safety_score"),
+                    "margin_of_safety": opp.get("margin_of_safety"),
+                    "price": opp.get("price"),
+                    "strategy": opp.get("strategy"),
+                },
+            ))
+        except Exception:
+            pass  # no bloquear respuesta por fallo de logging
 
 
 async def cmd_macro(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -1,19 +1,21 @@
 """
-Repositorio – Learning, Market Context, OpenAI Usage, Dividends.
+Repositorio – Learning, Market Context, OpenAI Usage, Dividends, Analysis Logs.
 """
 
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Sequence
 
-from sqlalchemy import select, func
+from sqlalchemy import Integer, select, func
 
 from database.connection import async_session_factory
 from database.models import (
+    AnalysisLog,
     DividendPayment,
     LearningLog,
     MarketContext,
     OpenAIUsage,
+    Signal,
 )
 
 logger = logging.getLogger(__name__)
@@ -211,3 +213,156 @@ async def get_total_dividends(
             q = q.where(DividendPayment.ticker == ticker.upper())
         result = await session.execute(q)
         return round(result.scalar() or 0.0, 2)
+
+
+# ── Analysis Logs ────────────────────────────────────────────
+
+
+async def save_analysis_log(log: AnalysisLog) -> AnalysisLog:
+    """Persiste un registro completo de análisis."""
+    async with async_session_factory() as session:
+        session.add(log)
+        await session.commit()
+        await session.refresh(log)
+        return log
+
+
+async def get_analysis_logs(
+    ticker: str | None = None,
+    limit: int = 20,
+) -> Sequence[AnalysisLog]:
+    """Obtiene los últimos análisis, opcionalmente filtrados por ticker."""
+    async with async_session_factory() as session:
+        stmt = select(AnalysisLog).order_by(AnalysisLog.created_at.desc())
+        if ticker:
+            stmt = stmt.where(AnalysisLog.ticker == ticker.upper())
+        stmt = stmt.limit(limit)
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+
+async def get_latest_analysis(ticker: str) -> AnalysisLog | None:
+    """Devuelve el análisis más reciente de un ticker."""
+    logs = await get_analysis_logs(ticker=ticker, limit=1)
+    return logs[0] if logs else None
+
+
+# ── Signal Accuracy ──────────────────────────────────────────
+
+
+async def get_old_signals_for_validation(
+    min_age_days: int = 30,
+    max_age_days: int = 120,
+    limit: int = 50,
+) -> Sequence[Signal]:
+    """Obtiene señales BUY/SELL antiguas que aún no han sido validadas."""
+    async with async_session_factory() as session:
+        since = datetime.now(UTC) - timedelta(days=max_age_days)
+        until = datetime.now(UTC) - timedelta(days=min_age_days)
+        stmt = (
+            select(Signal)
+            .where(
+                Signal.created_at >= since,
+                Signal.created_at <= until,
+                Signal.signal_type.in_(["BUY", "SELL"]),
+                Signal.acted_on == False,  # noqa: E712  — not yet validated
+            )
+            .order_by(Signal.created_at.asc())
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+
+async def mark_signal_validated(signal_id: int) -> None:
+    """Marca una señal como validada (acted_on=True) para no re-evaluarla."""
+    from sqlalchemy import update as sa_update
+
+    async with async_session_factory() as session:
+        stmt = sa_update(Signal).where(Signal.id == signal_id).values(acted_on=True)
+        await session.execute(stmt)
+        await session.commit()
+
+
+# ── Market Context helpers ───────────────────────────────────
+
+
+async def get_market_context_near_date(
+    target_date: datetime,
+    window_hours: int = 48,
+) -> MarketContext | None:
+    """Obtiene el contexto de mercado más cercano a una fecha dada."""
+    async with async_session_factory() as session:
+        lower = target_date - timedelta(hours=window_hours)
+        upper = target_date + timedelta(hours=window_hours)
+        stmt = (
+            select(MarketContext)
+            .where(
+                MarketContext.created_at >= lower,
+                MarketContext.created_at <= upper,
+            )
+            .order_by(
+                func.abs(
+                    func.extract("epoch", MarketContext.created_at)
+                    - func.extract("epoch", target_date)
+                )
+            )
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
+
+# ── Learning enriched queries ────────────────────────────────
+
+
+async def get_learning_stats_by_origin() -> dict:
+    """Estadísticas de aprendizaje agrupadas por origin (manual/auto/safe)."""
+    async with async_session_factory() as session:
+        stmt = (
+            select(
+                LearningLog.origin,
+                func.count(LearningLog.id).label("total"),
+                func.avg(LearningLog.profit_pct).label("avg_pnl"),
+                func.sum(
+                    func.cast(LearningLog.outcome == "win", Integer)
+                ).label("wins"),
+            )
+            .where(LearningLog.origin.isnot(None))
+            .group_by(LearningLog.origin)
+        )
+        result = await session.execute(stmt)
+        rows = result.all()
+        return {
+            row.origin: {
+                "total": row.total,
+                "avg_pnl": round(float(row.avg_pnl or 0), 2),
+                "wins": row.wins or 0,
+                "win_rate": round((row.wins or 0) / max(row.total, 1) * 100, 1),
+            }
+            for row in rows
+        }
+
+
+async def get_learning_stats_by_market_regime() -> dict:
+    """Estadísticas de aprendizaje por régimen de mercado."""
+    async with async_session_factory() as session:
+        stmt = (
+            select(
+                LearningLog.market_regime,
+                func.count(LearningLog.id).label("total"),
+                func.avg(LearningLog.profit_pct).label("avg_pnl"),
+            )
+            .where(LearningLog.market_regime.isnot(None))
+            .group_by(LearningLog.market_regime)
+        )
+        result = await session.execute(stmt)
+        rows = result.all()
+        return {
+            row.market_regime: {
+                "total": row.total,
+                "avg_pnl": round(float(row.avg_pnl or 0), 2),
+            }
+            for row in rows
+        }
+

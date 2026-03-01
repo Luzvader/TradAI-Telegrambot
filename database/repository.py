@@ -67,14 +67,22 @@ from database.repos.config import (  # noqa: F401
     update_auto_mode_timestamps,
 )
 
-# ── Learning, Market Context, OpenAI Usage, Dividends ─────────
+# ── Learning, Market Context, OpenAI Usage, Dividends, Analysis ──
 from database.repos.analytics import (  # noqa: F401
+    get_analysis_logs,
     get_dividends_for_portfolio,
+    get_latest_analysis,
     get_latest_context,
     get_learning_logs,
+    get_learning_stats_by_market_regime,
+    get_learning_stats_by_origin,
     get_learning_summary,
+    get_market_context_near_date,
+    get_old_signals_for_validation,
     get_openai_usage_summary,
     get_total_dividends,
+    mark_signal_validated,
+    save_analysis_log,
     save_dividend_payment,
     save_learning_log,
     save_market_context,

@@ -423,7 +423,7 @@ async def analyze_with_context(
         try:
             from broker.bridge import get_trading212_tradability
 
-            tradability = await get_trading212_tradability(ticker)
+            tradability = await get_trading212_tradability(ticker, market_norm)
             if tradability.get("tradable") is True:
                 tradability_text = (
                     "OPERABILIDAD TRADING212:\n"

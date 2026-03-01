@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from database.connection import async_session_factory
 from database.models import (
     Operation,
+    OperationOrigin,
     OperationSide,
     Portfolio,
     PortfolioSnapshot,
@@ -190,6 +191,7 @@ async def record_operation(
     amount_usd: float,
     shares: float,
     notes: str | None = None,
+    origin: OperationOrigin = OperationOrigin.MANUAL,
 ) -> Operation:
     async with async_session_factory() as session:
         op = Operation(
@@ -201,6 +203,7 @@ async def record_operation(
             amount_usd=amount_usd,
             shares=shares,
             notes=notes,
+            origin=origin,
         )
         session.add(op)
         await session.commit()

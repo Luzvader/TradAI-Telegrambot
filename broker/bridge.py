@@ -18,11 +18,16 @@ import logging
 from datetime import datetime, UTC
 from typing import Any
 
-from broker.trading212 import Trading212Client, get_trading212_client
+from broker.trading212 import (
+    MARKET_EXCHANGE_MAP,
+    Trading212Client,
+    get_trading212_client,
+)
 from broker.base import BrokerResult
 
 logger = logging.getLogger(__name__)
 _TRADABILITY_CACHE: dict[str, dict[str, Any]] = {}
+_CATALOG_REFRESHED_ON_MISS = False
 
 
 def _check_broker_ready(require_auto_execute: bool = True) -> tuple[Trading212Client | None, str]:
@@ -38,18 +43,96 @@ def _check_broker_ready(require_auto_execute: bool = True) -> tuple[Trading212Cl
     return client, ""
 
 
-async def get_trading212_tradability(ticker: str) -> dict[str, Any]:
+def _tradability_cache_key(ticker: str, market: str | None = None) -> str:
+    tk = ticker.strip().upper()
+    mkt = (market or "").strip().upper()
+    return f"{tk}|{mkt}" if mkt else tk
+
+
+def _select_best_t212_match(
+    ticker: str,
+    candidates: list[dict[str, Any]],
+    market: str | None = None,
+) -> dict[str, Any] | None:
+    """Selecciona el mejor candidato de Trading212 para un ticker/mercado."""
+    if not candidates:
+        return None
+
+    tk = ticker.strip().upper()
+    mkt = (market or "").strip().upper()
+    preferred_suffix = MARKET_EXCHANGE_MAP.get(mkt, "")
+
+    def _clean(value: Any) -> str:
+        return str(value or "").strip().upper()
+
+    if preferred_suffix:
+        for inst in candidates:
+            clean = _clean(inst.get("ticker"))
+            t212 = _clean(inst.get("ticker_t212"))
+            if clean == tk and t212.endswith(preferred_suffix):
+                return inst
+
+    for inst in candidates:
+        if _clean(inst.get("ticker")) == tk:
+            return inst
+
+    if preferred_suffix:
+        for inst in candidates:
+            clean = _clean(inst.get("ticker"))
+            t212 = _clean(inst.get("ticker_t212"))
+            if t212.endswith(preferred_suffix) and (
+                clean.startswith(tk) or tk in clean or tk in t212
+            ):
+                return inst
+        for inst in candidates:
+            if _clean(inst.get("ticker_t212")).endswith(preferred_suffix):
+                return inst
+
+    for inst in candidates:
+        clean = _clean(inst.get("ticker"))
+        t212 = _clean(inst.get("ticker_t212"))
+        if tk in clean or tk in t212:
+            return inst
+
+    return candidates[0]
+
+
+def _build_tradability_info(
+    ticker: str,
+    inst: dict[str, Any],
+    market: str | None = None,
+) -> dict[str, Any]:
+    info: dict[str, Any] = {
+        "tradable": True,
+        "ticker": ticker,
+        "instrument_ticker": inst.get("ticker_t212", ticker),
+        "name": inst.get("name", ""),
+        "type": inst.get("type", ""),
+        "currency": inst.get("currency", ""),
+        "isin": inst.get("isin", ""),
+    }
+    if market:
+        info["requested_market"] = market
+    return info
+
+
+async def get_trading212_tradability(
+    ticker: str,
+    market: str | None = None,
+) -> dict[str, Any]:
     """
     Comprueba si un ticker es operable en Trading212.
     Usa catálogo cacheado para máxima eficiencia.
     Devuelve un dict compacto para enriquecer análisis y scans.
     """
     tk = ticker.strip().upper()
+    market_norm = market.strip().upper() if market else None
     if not tk:
         return {"tradable": False, "reason": "Ticker vacío"}
 
-    if tk in _TRADABILITY_CACHE:
-        return _TRADABILITY_CACHE[tk]
+    cache_key = _tradability_cache_key(tk, market_norm)
+    if cache_key in _TRADABILITY_CACHE:
+        return _TRADABILITY_CACHE[cache_key]
 
     client = get_trading212_client()
     if client is None:
@@ -58,19 +141,28 @@ async def get_trading212_tradability(ticker: str) -> dict[str, Any]:
             "reason": "Trading212 no inicializado",
         }
 
+    global _CATALOG_REFRESHED_ON_MISS
     try:
         inst = await client.get_instrument_info(tk)
+
+        if inst is None:
+            search = await client.search_instrument(tk)
+            if search.success and search.data:
+                inst = _select_best_t212_match(tk, search.data, market_norm)
+
+        if inst is None and not _CATALOG_REFRESHED_ON_MISS:
+            await client.get_all_instruments(force_refresh=True)
+            _CATALOG_REFRESHED_ON_MISS = True
+
+            inst = await client.get_instrument_info(tk)
+            if inst is None:
+                search = await client.search_instrument(tk)
+                if search.success and search.data:
+                    inst = _select_best_t212_match(tk, search.data, market_norm)
+
         if inst:
-            info = {
-                "tradable": True,
-                "ticker": tk,
-                "instrument_ticker": inst.get("ticker_t212", tk),
-                "name": inst.get("name", ""),
-                "type": inst.get("type", ""),
-                "currency": inst.get("currency", ""),
-                "isin": inst.get("isin", ""),
-            }
-            _TRADABILITY_CACHE[tk] = info
+            info = _build_tradability_info(tk, inst, market_norm)
+            _TRADABILITY_CACHE[cache_key] = info
             return info
 
         info = {
@@ -78,12 +170,16 @@ async def get_trading212_tradability(ticker: str) -> dict[str, Any]:
             "ticker": tk,
             "reason": "No encontrado en Trading212",
         }
-        _TRADABILITY_CACHE[tk] = info
+        if market_norm:
+            info["requested_market"] = market_norm
+        _TRADABILITY_CACHE[cache_key] = info
         return info
     except Exception as e:
         logger.debug(f"Error comprobando tradability de {tk}: {e}")
         info = {"tradable": None, "ticker": tk, "reason": str(e)}
-        _TRADABILITY_CACHE[tk] = info
+        if market_norm:
+            info["requested_market"] = market_norm
+        _TRADABILITY_CACHE[cache_key] = info
         return info
 
 

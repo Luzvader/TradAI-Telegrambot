@@ -67,6 +67,14 @@ class AutoModeType(str, enum.Enum):
     SAFE = "safe"  # Auto con confirmación: pide aprobación antes de operar
 
 
+class OperationOrigin(str, enum.Enum):
+    MANUAL = "manual"      # Operación manual del usuario
+    AUTO = "auto"          # Operación del modo automático (ON)
+    SAFE = "safe"          # Operación confirmada vía modo SAFE
+    BACKTEST = "backtest"  # Operación de backtesting
+    IMPORT = "import"      # Importada desde broker
+
+
 class StrategyType(str, enum.Enum):
     VALUE = "value"               # Value investing clásico
     GROWTH = "growth"             # Crecimiento agresivo
@@ -133,6 +141,7 @@ class Operation(Base):
     price = Column(Float, nullable=False)
     amount_usd = Column(Float, nullable=False)
     shares = Column(Float, nullable=False)
+    origin = Column(Enum(OperationOrigin), default=OperationOrigin.MANUAL, nullable=False)
     timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     notes = Column(Text, nullable=True)
 
@@ -248,6 +257,13 @@ class LearningLog(Base):
     market_context_at_entry = Column(Text, nullable=True)
     source = Column(String(20), nullable=False, default="real")  # "real", "backtest"
     strategy_used = Column(String(30), nullable=True)  # Estrategia que generó la operación
+    origin = Column(String(20), nullable=True)  # "manual", "auto", "safe", "import"
+    total_dividends = Column(Float, nullable=True)  # Dividendos cobrados durante posición
+    entry_signal_score = Column(Float, nullable=True)  # Score en el momento de compra
+    entry_rsi = Column(Float, nullable=True)  # RSI en el momento de compra
+    entry_macd_signal = Column(String(20), nullable=True)  # "bullish", "bearish", "neutral"
+    diversification_score_at_entry = Column(Float, nullable=True)  # Score diversificación
+    market_regime = Column(String(30), nullable=True)  # "fear", "greed", "neutral"
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
@@ -341,6 +357,45 @@ class OpenAIUsage(Base):
 
     __table_args__ = (
         Index("ix_openai_usage_created", "created_at"),
+    )
+
+
+class AnalysisLog(Base):
+    """Registro completo de cada análisis ejecutado.
+
+    Almacena el resultado sin resumir de ``analyze_ticker`` para que el
+    motor de aprendizaje pueda comparar predicción vs. realidad y
+    extraer patrones útiles.
+    """
+    __tablename__ = "analysis_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String(20), nullable=False)
+    market = Column(String(20), nullable=False, default="NASDAQ")
+    strategy_used = Column(String(30), nullable=True)
+    signal = Column(String(10), nullable=False)           # BUY / SELL / HOLD
+    overall_score = Column(Float, nullable=True)
+    value_score = Column(Float, nullable=True)
+    quality_score = Column(Float, nullable=True)
+    safety_score = Column(Float, nullable=True)
+    price_at_analysis = Column(Float, nullable=True)
+    margin_of_safety = Column(Float, nullable=True)
+    pe_ratio = Column(Float, nullable=True)
+    roe = Column(Float, nullable=True)
+    debt_to_equity = Column(Float, nullable=True)
+    dividend_yield = Column(Float, nullable=True)
+    reasoning = Column(Text, nullable=True)               # JSON list → joined text
+    tech_summary = Column(Text, nullable=True)
+    price_summary = Column(Text, nullable=True)
+    ai_analysis = Column(Text, nullable=True)             # Resumen IA (completo)
+    broker_tradable = Column(Boolean, nullable=True)      # T212 tradable?
+    deterministic_context = Column(Text, nullable=True)   # Contexto determinista completo
+    source = Column(String(20), nullable=False, default="manual")  # manual / auto / scan
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+    __table_args__ = (
+        Index("ix_analysis_logs_ticker", "ticker"),
+        Index("ix_analysis_logs_created", "created_at"),
     )
 
 

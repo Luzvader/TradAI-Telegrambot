@@ -20,6 +20,7 @@ from data.fundamentals import get_sector
 from data.market_data import get_prices_batch, refresh_broker_prices
 from database import repository as repo
 from database.models import (
+    OperationOrigin,
     OperationSide,
     Portfolio,
     PortfolioType,
@@ -54,6 +55,7 @@ async def execute_buy(
     shares: float,
     market: str = "NASDAQ",
     notes: str | None = None,
+    origin: OperationOrigin = OperationOrigin.MANUAL,
 ) -> dict[str, Any]:
     """
     Registra una operación de compra.
@@ -123,6 +125,7 @@ async def execute_buy(
         amount_usd=amount_usd,
         shares=shares,
         notes=notes,
+        origin=origin,
     )
 
     # Actualizar/crear posición
@@ -166,6 +169,7 @@ async def execute_sell(
     shares_to_sell: float,
     market: str = "NASDAQ",
     notes: str | None = None,
+    origin: OperationOrigin = OperationOrigin.MANUAL,
 ) -> dict[str, Any]:
     """
     Registra una operación de venta.
@@ -233,6 +237,7 @@ async def execute_sell(
         amount_usd=amount,
         shares=shares,
         notes=notes,
+        origin=origin,
     )
 
     # Actualizar posición
@@ -266,6 +271,85 @@ async def execute_sell(
         try:
             from ai.learning import analyze_closed_trade
             holding_days = (datetime.now(UTC) - position.opened_at).days if position.opened_at else 0
+
+            # ── Recopilar contexto enriquecido para el aprendizaje ──
+            # Dividendos cobrados durante la posición
+            total_dividends = 0.0
+            try:
+                total_dividends = await repo.get_total_dividends(
+                    portfolio_id, ticker=ticker
+                )
+            except Exception:
+                pass
+
+            # Contexto de mercado al momento de la entrada
+            market_ctx = None
+            try:
+                if position.opened_at:
+                    ctx = await repo.get_market_context_near_date(position.opened_at)
+                    if ctx:
+                        market_ctx = ctx.summary[:300]
+            except Exception:
+                pass
+
+            # Indicadores técnicos actuales (momento de venta)
+            entry_rsi = None
+            entry_macd_signal = None
+            try:
+                from data.technical import get_technical_analysis
+                ti = await get_technical_analysis(ticker, market)
+                if ti:
+                    entry_rsi = ti.rsi
+                    entry_macd_signal = ti.signal if hasattr(ti, "signal") else None
+            except Exception:
+                pass
+
+            # Score de señal al momento de compra
+            entry_score = None
+            try:
+                analysis = await repo.get_latest_analysis(ticker)
+                if analysis:
+                    entry_score = analysis.overall_score
+            except Exception:
+                pass
+
+            # Score de diversificación
+            div_score = None
+            try:
+                from strategy.correlation import portfolio_correlation
+                positions_all = list(await repo.get_open_positions(portfolio_id))
+                if len(positions_all) >= 2:
+                    corr_result = await portfolio_correlation(positions_all)
+                    div_score = corr_result.get("diversification_score")
+            except Exception:
+                pass
+
+            # Régimen de mercado
+            market_regime = None
+            try:
+                latest_ctx = await repo.get_latest_context("geopolitical", limit=1)
+                if latest_ctx:
+                    summary_lower = latest_ctx[0].summary.lower()
+                    if any(w in summary_lower for w in ("miedo", "fear", "pánico", "crisis")):
+                        market_regime = "fear"
+                    elif any(w in summary_lower for w in ("codicia", "greed", "euforia", "rally")):
+                        market_regime = "greed"
+                    else:
+                        market_regime = "neutral"
+            except Exception:
+                pass
+
+            # Determinar origin de la operación
+            origin_str = origin.value if origin else "manual"
+
+            # Obtener estrategia activa
+            strategy_used = None
+            try:
+                strategy_obj = await repo.get_portfolio_strategy(portfolio_id)
+                strategy_used = strategy_obj.value if strategy_obj else None
+            except Exception:
+                pass
+
             asyncio.create_task(
                 analyze_closed_trade(
                     ticker=ticker,
@@ -273,9 +357,19 @@ async def execute_sell(
                     entry_price=position.avg_price,
                     exit_price=price,
                     holding_days=holding_days,
+                    market_context=market_ctx,
+                    source="real",
+                    strategy_used=strategy_used,
+                    origin=origin_str,
+                    total_dividends=total_dividends,
+                    entry_signal_score=entry_score,
+                    entry_rsi=entry_rsi,
+                    entry_macd_signal=entry_macd_signal,
+                    diversification_score_at_entry=div_score,
+                    market_regime=market_regime,
                 )
             )
-            logger.info(f"🧠 Análisis de aprendizaje lanzado para {ticker}")
+            logger.info(f"🧠 Análisis de aprendizaje lanzado para {ticker} (contexto enriquecido)")
         except Exception as e:
             logger.warning(f"Error lanzando aprendizaje para {ticker}: {e}")
 

@@ -2,7 +2,7 @@
 
 Bot de señales de inversión que corre 24/7 en un servidor,
 monitoriza mercados en tiempo real y se administra completamente
-por **Telegram**. Ahora opera en modo **broker-first con Trading212**
+por **Telegram**. Opera en modo **broker-first con Trading212**
 (demo por defecto): las operaciones reales se ejecutan en la plataforma
 y TradAI mantiene sincronía para análisis, señales y aprendizaje.
 
@@ -25,22 +25,39 @@ y TradAI mantiene sincronía para análisis, señales y aprendizaje.
 | **Watchlist IA** | Hasta 5 acciones fuera de cartera para estudio |
 | **Contexto Geopolítico** | IA analiza noticias macro y sectoriales |
 | **Earnings** | Monitoriza resultados trimestrales de empresas en cartera |
-| **Aprendizaje** | IA analiza aciertos/errores pasados para optimizarse |
 | **Benchmark** | Comparación semanal con SPY y tracking de NAV |
 | **Alertas avanzadas** | Alertas de precio, volumen y RSI (sobrecompra/sobreventa) |
 | **Caché** | Sistema de caché en memoria para reducir llamadas API |
 | **Deduplicación** | Evita señales duplicadas en 24h |
-| **Tickers Dinámicos** | Descubrimiento automático de tickers desde los índices (S&P 500, DAX, CAC, MIB, FTSE, IBEX, AEX) |
-| **Justificación de Señales** | Cada señal de compra/venta incluye justificación detallada: scores, fundamentales, análisis IA |
+| **Tickers Dinámicos** | Descubrimiento automático de tickers desde índices (S&P 500, DAX, CAC, MIB, FTSE, IBEX, AEX) |
+| **Justificación de Señales** | Cada señal incluye justificación detallada: scores, fundamentales, análisis IA |
 | **Objetivos de Inversión** | Tesis, catalizadores, riesgos, precios objetivo y convicción por empresa |
 | **Calendario Earnings** | Monitorización automática de resultados, alertas ≤7 días, análisis pre-earnings |
 | **Coste OpenAI** | Tracking real de tokens, costes por modelo y rate limiting configurable |
 | **Dashboard Web** | Panel web con resumen de portfolio, posiciones, señales y métricas (FastAPI + htmx) |
 | **Confirmaciones** | Botones inline para confirmar compras/ventas |
-| **Telegram** | 22+ comandos para administración completa |
+| **Telegram** | 24 comandos para administración completa |
 | **Multi-mercado** | NASDAQ, NYSE, IBEX 35, DAX, CAC 40, FTSE MIB, FTSE 100, AEX con horarios y festivos |
 | **Migraciones** | Alembic para migraciones de base de datos + auto-sync de columnas |
 | **Tests** | Suite de tests con pytest para componentes críticos |
+
+### 🧠 Motor de Aprendizaje
+
+El motor de aprendizaje (`ai/learning.py`) cierra el bucle de retroalimentación
+conectando datos de múltiples subsistemas para que la IA aprenda de su propia operativa:
+
+| Capacidad | Fuente de datos |
+|---|---|
+| **Análisis de operaciones cerradas** | `LearningLog` enriquecido con origen, dividendos, indicadores técnicos, contexto de mercado |
+| **Rastreo de origen** | Cada operación se etiqueta como `manual`, `auto`, `safe`, `backtest` o `import` |
+| **Validación de señales** | Compara señales emitidas (30-120 días) con la evolución real del precio |
+| **Retorno ajustado por dividendos** | El P&L incluye dividendos cobrados durante la posesión |
+| **Contexto técnico** | RSI, MACD, score de la señal original se almacenan junto a cada trade |
+| **Régimen de mercado** | Clasificación bull/bear/uncertain basada en contexto geopolítico |
+| **Score de diversificación** | Correlación del portfolio en el momento de entrada |
+| **Informes por estrategia** | Rendimiento comparativo por origen y por régimen de mercado |
+| **Persistencia de análisis** | Los resultados de `/analizar`, `/scan` y auto-scan se guardan en `AnalysisLog` |
+| **Insights y sesgos** | LLM analiza patrones, sesgos cognitivos y oportunidades de mejora |
 
 ## 🏗️ Arquitectura
 
@@ -52,13 +69,13 @@ TradAI/
 │   └── markets.py             # Horarios de mercado y mapping tickers
 ├── database/
 │   ├── connection.py          # Conexión async PostgreSQL + Unit of Work
-│   ├── models.py              # 15+ modelos SQLAlchemy (incl. DividendPayment)
+│   ├── models.py              # 15 modelos SQLAlchemy + 9 enums
 │   ├── repository.py          # Façade re-exportadora
 │   └── repos/                 # Sub-módulos CRUD por dominio
-│       ├── portfolio.py       # Portfolio, Position, Operation
+│       ├── portfolio.py       # Portfolio, Position, Operation (con origin tracking)
 │       ├── signals.py         # Signal, Watchlist, Earnings
 │       ├── config.py          # Auto Mode, Alerts, Objectives
-│       └── analytics.py       # Learning, OpenAI Usage, Dividends
+│       └── analytics.py       # Learning, OpenAI Usage, Dividends, AnalysisLog, Signal Validation
 ├── data/
 │   ├── market_data.py         # Precios con yfinance + caché
 │   ├── fundamentals.py        # Datos fundamentales
@@ -80,9 +97,11 @@ TradAI/
 │   ├── risk_manager.py        # Gestión de riesgos + ATR + trailing stop
 │   ├── screener.py            # Screening dinámico de tickers por índice
 │   ├── correlation.py         # Análisis de correlación / diversificación
+│   ├── price_analyst.py       # Análisis de precio con IA
+│   ├── technical_analyst.py   # Análisis técnico detallado
 │   └── utils.py               # Utilidades compartidas (clamp)
 ├── portfolio/
-│   └── portfolio_manager.py   # Gestión de carteras + cash tracking
+│   └── portfolio_manager.py   # Gestión de carteras + cash + origin tracking + learning enrichment
 ├── signals/
 │   ├── signal_engine.py       # Façade del motor de señales
 │   ├── builders.py            # Justificación y contexto determinista
@@ -91,28 +110,43 @@ TradAI/
 ├── ai/
 │   ├── analyst.py             # Análisis IA + rate limiting + cost tracking
 │   ├── watchlist.py           # Watchlist generada por IA
-│   └── learning.py            # Aprendizaje de errores
+│   └── learning.py            # Motor de aprendizaje (5 funciones + validación de señales)
 ├── backtesting/
 │   ├── engine.py              # Motor de backtest
+│   ├── learning_bridge.py     # Puente backtest → aprendizaje
 │   └── metrics.py             # Sharpe, drawdown, alpha, win rate
+├── broker/
+│   ├── base.py                # Interfaz abstracta de broker
+│   ├── bridge.py              # Puente broker ↔ portfolio
+│   └── trading212.py          # Implementación Trading212 API
 ├── notifications/
 │   └── __init__.py            # Sistema centralizado de notificaciones Telegram
 ├── web/
 │   ├── app.py                 # Aplicación FastAPI
+│   ├── auth.py                # Autenticación web (TOTP)
 │   ├── routes.py              # Rutas web + API JSON
 │   ├── templates/             # Templates Jinja2 + htmx
-│   └── static/                # CSS/JS
+│   └── static/                # CSS
 ├── telegram_bot/
 │   ├── bot.py                 # Configuración del bot + inline keyboards
-│   └── handlers/              # 22+ comandos de Telegram (modularizados)
+│   ├── decorators.py          # Decoradores de autorización
+│   └── handlers/              # 24 comandos de Telegram (modularizados)
 │       ├── portfolio_cmds.py  # Cartera, buy, sell, capital, dividendos
 │       ├── analysis_cmds.py   # Analizar, scan, comparar, backtest, ETF, insider, diversificación
-│       ├── management_cmds.py # Alertas, auto mode, costes, earnings, help
+│       ├── broker_cmds.py     # Broker sync, import, búsqueda, historial
+│       ├── auto_cmds.py       # Modo automático on/off/safe
+│       ├── alert_cmds.py      # Alertas de precio, volumen, RSI
+│       ├── watchlist_cmds.py  # Watchlist IA
+│       ├── objective_cmds.py  # Objetivos de inversión
+│       ├── earnings_cmds.py   # Calendario de earnings
+│       ├── web_cmds.py        # Dashboard web
+│       ├── system_cmds.py     # Help, costes
 │       ├── callbacks.py       # Botones inline (confirmaciones)
-│       └── helpers.py         # Utilidades compartidas
+│       ├── helpers.py         # Utilidades compartidas
+│       └── registry.py        # CommandInfo dataclass
 ├── scheduler/
-│   ├── jobs.py                # 10+ tareas programadas (incl. alertas volumen/RSI)
-│   └── auto_mode.py           # Motor del modo automático
+│   ├── jobs.py                # 15 tareas programadas (incl. validación señales + trend analysis)
+│   └── auto_mode.py           # Motor del modo automático + origin tagging + AnalysisLog
 ├── alembic/                   # Migraciones de base de datos
 │   ├── env.py                 # Entorno async de Alembic
 │   └── versions/              # Archivos de migraciones
@@ -167,12 +201,22 @@ python main.py
 |---|---|
 | `/cartera` | Ver cartera: posiciones, señales, earnings, aprendizaje |
 | `/capital 10000` | Establecer capital inicial / ver capital actual |
+| `/dividendos` | Dividendos cobrados y resumen |
 
 ### Operaciones (con confirmación inline)
 | Comando | Ejemplo |
 |---|---|
 | `/buy TICKER CANTIDAD PRECIO` | `/buy AAPL 10 185.50` |
 | `/sell TICKER CANTIDAD PRECIO` | `/sell AAPL 5 200.00` |
+
+### Broker
+| Comando | Descripción |
+|---|---|
+| `/broker` | Estado de conexión con Trading212 |
+| `/broker sync` | Sincronizar posiciones desde el broker |
+| `/broker import` | Importar historial de operaciones |
+| `/broker buscar TICKER` | Buscar instrumento en Trading212 |
+| `/broker historial` | Ver historial de órdenes ejecutadas |
 
 ### Análisis
 | Comando | Descripción |
@@ -181,70 +225,43 @@ python main.py
 | `/scan` | Escanear mejores oportunidades del universo |
 | `/comparar TICKER1 TICKER2` | Comparar dos tickers lado a lado |
 | `/macro` | Análisis macroeconómico con IA |
-| `/backtest [TICKERS...]` | Backtest sobre cartera demo (o tickers indicados) con métricas y aprendizaje |
-| `/etf` | Ver categorías de ETFs disponibles |
-| `/etf CATEGORÍA` | Analizar ETFs de una categoría |
+| `/backtest [TICKERS...]` | Backtest sobre cartera demo (o tickers indicados) |
+| `/etf [CATEGORÍA]` | Ver/analizar ETFs por categoría |
 | `/insider TICKER` | Análisis de operaciones de insiders |
 | `/diversificacion` | Análisis de correlación y diversificación del portfolio |
-| `/dividendos` | Ver dividendos cobrados y resumen |
-
-### Historial y Alertas
-| Comando | Descripción |
-|---|---|
-| `/historial` | Últimas señales generadas |
-| `/alertas` | Ver alertas activas |
-| `/alertas crear TICKER precio_max 200` | Crear alerta de precio máximo |
-| `/alertas crear TICKER precio_min 150` | Crear alerta de precio mínimo |
-| `/alertas crear TICKER rsi_max 70` | Alerta RSI sobrecompra |
-| `/alertas crear TICKER rsi_min 30` | Alerta RSI sobreventa |
-| `/alertas crear TICKER volumen 2.0` | Alerta de volumen anómalo (x veces media) |
-| `/alertas borrar ID` | Eliminar una alerta |
-
-### Watchlist
-| Comando | Descripción |
-|---|---|
-| `/watchlist` | Ver watchlist activa (máx 5) |
-| `/watchlist generar` | IA genera nueva watchlist con tesis y objetivos |
-| `/watchlist quitar TICKER` | Quitar de watchlist |
-
-### Objetivos de Inversión
-| Comando | Descripción |
-|---|---|
-| `/objetivo` | Ver todos los objetivos activos |
-| `/objetivo TICKER` | Ver objetivo de un ticker |
-| `/objetivo TICKER tesis ...` | Definir tesis de inversión |
-| `/objetivo TICKER entrada 150` | Precio de entrada objetivo |
-| `/objetivo TICKER salida 200` | Precio de salida objetivo |
-| `/objetivo TICKER catalizadores ...` | Definir catalizadores |
-| `/objetivo TICKER riesgos ...` | Definir riesgos |
-| `/objetivo TICKER conviccion 8` | Nivel de convicción (1-10) |
-| `/objetivo TICKER borrar` | Eliminar objetivo |
-
-### Earnings
-| Comando | Descripción |
-|---|---|
-| `/earnings` | Calendario de earnings (cartera + watchlist) |
-| `/earnings TICKER` | Historial de resultados de un ticker |
 
 ### Estrategia (con selector de botones)
 | Comando | Descripción |
 |---|---|
 | `/strategy` | Ver estrategia activa + selector visual |
-| `/strategy value` | Value investing clásico |
-| `/strategy growth` | Crecimiento agresivo |
-| `/strategy dividend` | Dividendos / income |
-| `/strategy balanced` | Equilibrado value + growth |
-| `/strategy conservative` | Ultra conservador |
+| `/strategy value\|growth\|dividend\|balanced\|conservative` | Cambiar estrategia |
 
-### Costes y Modo Auto
+### Historial, Alertas y Watchlist
 | Comando | Descripción |
 |---|---|
-| `/costes` | Uso y costes estimados de OpenAI |
+| `/historial` | Últimas señales generadas |
+| `/alertas` | Ver alertas activas |
+| `/alertas crear TICKER tipo valor` | Crear alerta (precio_max, precio_min, rsi_max, rsi_min, volumen) |
+| `/alertas borrar ID` | Eliminar una alerta |
+| `/watchlist` | Ver watchlist activa (máx 5) |
+| `/watchlist generar` | IA genera nueva watchlist con tesis y objetivos |
+| `/watchlist quitar TICKER` | Quitar de watchlist |
+
+### Objetivos y Earnings
+| Comando | Descripción |
+|---|---|
+| `/objetivo [TICKER]` | Ver/gestionar objetivos de inversión (tesis, catalizadores, riesgos, convicción) |
+| `/earnings [TICKER]` | Calendario de earnings / historial de un ticker |
+
+### Sistema
+| Comando | Descripción |
+|---|---|
 | `/auto` | Ver estado del modo automático |
-| `/auto on / off` | Activar / desactivar |
-| `/auto scan 30` | Intervalo de scan (min) |
-| `/auto analyze 60` | Intervalo de análisis (min) |
-| `/auto summary 9 0` | Hora del resumen diario |
+| `/auto on\|off\|safe` | Activar / desactivar / modo seguro |
+| `/auto scan\|analyze\|summary ...` | Configurar intervalos y horarios |
+| `/costes` | Uso y costes estimados de OpenAI |
+| `/web` | Código de acceso al dashboard web |
+| `/help` | Ayuda y lista de comandos |
 
 ## 🛡️ Gestión de Riesgos
 
@@ -257,7 +274,7 @@ El sistema emula las reglas de un fondo de inversión:
 - **Trailing Stop**: Protección dinámica de beneficios
 - **Position sizing**: Basado en convicción (score) y reglas de riesgo
 
-## 🧠 Scoring de Estrategia
+## 🧮 Scoring de Estrategia
 
 Cada acción recibe 3 scores (0-100):
 
@@ -273,7 +290,7 @@ Cada acción recibe 3 scores (0-100):
 
 Los umbrales son configurables vía variables de entorno: `SIGNAL_BUY_THRESHOLD`, `SIGNAL_SELL_THRESHOLD`, `SCAN_MIN_SCORE`.
 
-## ⏰ Tareas Programadas
+## ⏰ Tareas Programadas (15 jobs)
 
 | Frecuencia | Tarea |
 |---|---|
@@ -283,11 +300,15 @@ Los umbrales son configurables vía variables de entorno: `SIGNAL_BUY_THRESHOLD`
 | Diario 7:00 | Resumen del portfolio por Telegram |
 | Diario 8:00 | Guardar contexto geopolítico |
 | Diario 18:00 | Snapshot del portfolio (NAV tracking) |
-| Domingo 20:00 | Insights de aprendizaje semanal |
-| Domingo 21:00 | Resumen semanal con benchmark (vs SPY) |
 | Diario 9:30 | Calendario de earnings (alerta ≤7 días, análisis pre-earnings ≤3 días) |
 | Cada 5 min | Ciclo del modo automático |
-| Cada 60 min (configurable) | Backtest autónomo sobre cartera demo |
+| Cada 60 min | Backtest autónomo sobre cartera demo |
+| Semanal Dom 19:00 | Validación de precisión de señales (30-120 días) |
+| Semanal Dom 20:00 | Insights de aprendizaje semanal |
+| Semanal Dom 21:00 | Resumen semanal con benchmark (vs SPY) |
+| Semanal Sáb 10:00 | Análisis de tendencias de snapshots (drawdown, alpha, recovery) |
+| Diario | Tracking de dividendos |
+| Configurable | Checkeo automático de dividendos |
 
 Los horarios de mercado se gestionan automáticamente con soporte de festivos:
 - **NASDAQ/NYSE**: 9:30 – 16:00 (ET)
@@ -297,6 +318,28 @@ Los horarios de mercado se gestionan automáticamente con soporte de festivos:
 - **FTSE MIB (Milán)**: 9:00 – 17:30 (CET)
 - **FTSE 100 (LSE)**: 8:00 – 16:30 (GMT)
 - **AEX (Euronext Amsterdam)**: 9:00 – 17:30 (CET)
+
+## 🗄️ Modelos de Datos (15 modelos + 9 enums)
+
+| Modelo | Propósito |
+|---|---|
+| `Portfolio` | Carteras (real/demo) con estrategia y capital |
+| `Position` | Posiciones abiertas/cerradas con precio medio y P&L |
+| `Operation` | Compras/ventas con rastreo de origen (`OperationOrigin`) |
+| `Signal` | Señales BUY/SELL/HOLD con scores y justificación |
+| `WatchlistItem` | Watchlist IA con tesis y estado |
+| `EarningsEvent` | Eventos de resultados trimestrales |
+| `DividendPayment` | Cobros de dividendos por posición |
+| `LearningLog` | Registro de aprendizaje enriquecido (origen, técnicos, contexto, dividendos) |
+| `MarketContext` | Contexto geopolítico diario |
+| `AutoModeConfig` | Configuración del modo automático |
+| `PortfolioSnapshot` | Snapshots diarios de NAV + benchmark |
+| `CustomAlert` | Alertas personalizadas de precio/volumen/RSI |
+| `OpenAIUsage` | Tracking de tokens y costes por modelo |
+| `AnalysisLog` | Análisis completos persistidos (analizar, scan, auto-scan) |
+| `InvestmentObjective` | Objetivos de inversión con tesis y catalizadores |
+
+Enums: `PortfolioType`, `OperationSide`, `SignalType`, `PositionStatus`, `WatchlistStatus`, `AssetType`, `AutoModeType`, `OperationOrigin`, `StrategyType`.
 
 ## 📊 Stack Tecnológico
 
