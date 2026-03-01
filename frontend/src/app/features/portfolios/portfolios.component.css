@@ -1,0 +1,99 @@
+.page {
+  display: grid;
+  gap: 1rem;
+  animation: slideUp 220ms ease;
+}
+
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.overline {
+  font-size: 0.72rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  margin-bottom: 0.2rem;
+}
+
+h3 {
+  font-size: 1.38rem;
+}
+
+.subtext {
+  margin-top: 0.28rem;
+  color: var(--text-soft);
+  font-size: 0.92rem;
+}
+
+.portfolio-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem;
+}
+
+.block {
+  padding: 1rem;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.block-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.block-head h4 {
+  font-size: 1.03rem;
+}
+
+.caption {
+  color: var(--text-soft);
+  font-size: 0.84rem;
+  margin-top: 0.2rem;
+}
+
+.meta-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.meta-row small {
+  display: block;
+  color: var(--text-soft);
+  font-size: 0.75rem;
+}
+
+.meta-row strong {
+  font-size: 0.96rem;
+}
+
+.table-wrap {
+  max-height: 440px;
+  overflow: auto;
+}
+
+.error {
+  color: #fff;
+  background: var(--red);
+  border-radius: 12px;
+  padding: 0.72rem 0.85rem;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 1180px) {
+  .portfolio-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .meta-row {
+    grid-template-columns: 1fr;
+  }
+}

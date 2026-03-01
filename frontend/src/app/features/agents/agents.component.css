@@ -1,0 +1,138 @@
+.page {
+  display: grid;
+  gap: 1rem;
+  animation: slideUp 220ms ease;
+}
+
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.overline {
+  font-size: 0.72rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  margin-bottom: 0.2rem;
+}
+
+h3 {
+  font-size: 1.36rem;
+}
+
+.subtext {
+  margin-top: 0.25rem;
+  color: var(--text-soft);
+}
+
+.registry,
+.form-panel,
+.result {
+  padding: 1rem;
+}
+
+.registry h4,
+.form-panel h4,
+.result h4 {
+  margin-bottom: 0.8rem;
+}
+
+.agent-grid {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.agent-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.38rem;
+}
+
+.agent-card .line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.agent-card p {
+  color: var(--text-soft);
+  font-size: 0.86rem;
+}
+
+.agent-card small {
+  color: var(--brand-2);
+  font-size: 0.73rem;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-bottom: 0.85rem;
+}
+
+.span-2 {
+  grid-column: span 2;
+}
+
+label span {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--text-soft);
+  font-size: 0.79rem;
+}
+
+.result .head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.7rem;
+}
+
+.result pre {
+  margin: 0;
+  white-space: pre-wrap;
+  background: #0a1325;
+  color: #deecff;
+  border: 1px solid #203661;
+  border-radius: 12px;
+  padding: 0.75rem;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.error {
+  color: #fff;
+  background: var(--red);
+  border-radius: 12px;
+  padding: 0.72rem 0.85rem;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 1200px) {
+  .agent-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .agent-grid,
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .span-2 {
+    grid-column: span 1;
+  }
+}

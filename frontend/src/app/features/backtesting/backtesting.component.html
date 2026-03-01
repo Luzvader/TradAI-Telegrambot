@@ -1,0 +1,98 @@
+<div class="page">
+  <header>
+    <p class="mono overline">simulation lab</p>
+    <h3>Run scenario backtests on demand</h3>
+    <p class="subtext">Stress strategy assumptions with configurable thresholds and learning switches.</p>
+  </header>
+
+  <section class="panel form-panel">
+    <div class="grid">
+      <label class="span-2">
+        <span>Tickers (comma separated)</span>
+        <textarea rows="2" [(ngModel)]="form.tickersText"></textarea>
+      </label>
+
+      <label>
+        <span>Period</span>
+        <select [(ngModel)]="form.period">
+          <option value="6mo">6mo</option>
+          <option value="1y">1y</option>
+          <option value="2y">2y</option>
+          <option value="5y">5y</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Strategy (optional)</span>
+        <select [(ngModel)]="form.strategy">
+          <option value="">Use active strategy</option>
+          <option value="value">value</option>
+          <option value="growth">growth</option>
+          <option value="dividend">dividend</option>
+          <option value="balanced">balanced</option>
+          <option value="conservative">conservative</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Initial capital</span>
+        <input type="number" [(ngModel)]="form.initial_capital">
+      </label>
+      <label>
+        <span>Rebalance days</span>
+        <input type="number" [(ngModel)]="form.rebalance_days">
+      </label>
+      <label>
+        <span>Max positions</span>
+        <input type="number" [(ngModel)]="form.max_positions">
+      </label>
+      <label>
+        <span>Position size pct</span>
+        <input type="number" step="0.01" [(ngModel)]="form.position_size_pct">
+      </label>
+      <label>
+        <span>Buy threshold</span>
+        <input type="number" [(ngModel)]="form.buy_threshold">
+      </label>
+      <label>
+        <span>Sell threshold</span>
+        <input type="number" [(ngModel)]="form.sell_threshold">
+      </label>
+    </div>
+
+    <div class="toggles">
+      <label><input type="checkbox" [(ngModel)]="form.use_technicals"> use technicals</label>
+      <label><input type="checkbox" [(ngModel)]="form.use_learning"> use learning</label>
+      <label><input type="checkbox" [(ngModel)]="form.auto_learn"> auto learn output</label>
+    </div>
+
+    <button class="btn btn-primary" (click)="run()" [disabled]="loading()">
+      {{ loading() ? 'Running simulation...' : 'Run Backtest' }}
+    </button>
+  </section>
+
+  <p class="error" *ngIf="error()">{{ error() }}</p>
+
+  <section class="panel result" *ngIf="result()">
+    <div class="metrics">
+      <div>
+        <small>Final value</small>
+        <strong>{{ result().metrics?.final_value | number:'1.2-2' }}</strong>
+      </div>
+      <div>
+        <small>Total return</small>
+        <strong>{{ result().metrics?.total_return_pct | number:'1.2-2' }}%</strong>
+      </div>
+      <div>
+        <small>Sharpe</small>
+        <strong>{{ result().metrics?.sharpe_ratio | number:'1.2-2' }}</strong>
+      </div>
+      <div>
+        <small>Max drawdown</small>
+        <strong>{{ result().metrics?.max_drawdown_pct | number:'1.2-2' }}%</strong>
+      </div>
+    </div>
+
+    <pre class="mono">{{ result() | json }}</pre>
+  </section>
+</div>

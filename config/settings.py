@@ -3,6 +3,7 @@ Configuración central de TradAI.
 Carga variables de entorno y expone constantes globales.
 """
 
+import json
 import os
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pathlib import Path
@@ -63,6 +64,7 @@ DATABASE_URL: str = os.getenv(
 # ── OpenAI ───────────────────────────────────────────────────
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
+AI_AGENTS_JSON: str = os.getenv("AI_AGENTS_JSON", "")
 
 # ── Configuración general ───────────────────────────────────
 MONITOR_INTERVAL_MINUTES: int = _get_int("MONITOR_INTERVAL_MINUTES", 10)
@@ -178,6 +180,13 @@ def validate_settings() -> list[str]:
         warnings.append(
             "OPENAI_API_KEY vacío: análisis IA desactivado (solo análisis cuantitativo)."
         )
+    if AI_AGENTS_JSON.strip():
+        try:
+            parsed_agents = json.loads(AI_AGENTS_JSON)
+            if not isinstance(parsed_agents, list):
+                warnings.append("AI_AGENTS_JSON debe ser un array JSON de agentes.")
+        except json.JSONDecodeError:
+            warnings.append("AI_AGENTS_JSON no es JSON válido.")
     if TRADING212_API_KEY and TRADING212_MODE not in ("demo", "live"):
         warnings.append(
             f"TRADING212_MODE='{TRADING212_MODE}' inválido. Usa 'demo' o 'live'."

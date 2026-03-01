@@ -1,0 +1,142 @@
+.page {
+  display: grid;
+  gap: 1rem;
+  animation: slideUp 220ms ease;
+}
+
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.overline {
+  font-size: 0.72rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  margin-bottom: 0.2rem;
+}
+
+h3 {
+  font-size: 1.42rem;
+}
+
+.subtext {
+  margin-top: 0.28rem;
+  color: var(--text-soft);
+  font-size: 0.92rem;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.card {
+  padding: 1rem;
+}
+
+.card h4 {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.card .value {
+  margin: 0.5rem 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.card .meta {
+  font-size: 0.76rem;
+  color: var(--text-soft);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 0.8rem;
+}
+
+.panel-body {
+  padding: 1rem;
+}
+
+.panel-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.8rem;
+}
+
+.heatmap {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 0.55rem;
+}
+
+.tile {
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.tile strong {
+  font-size: 0.9rem;
+}
+
+.tile small {
+  color: var(--text-soft);
+}
+
+.tile.gain {
+  border-color: rgba(17, 133, 91, 0.32);
+  background: rgba(17, 133, 91, 0.08);
+}
+
+.tile.loss {
+  border-color: rgba(200, 66, 79, 0.28);
+  background: rgba(200, 66, 79, 0.07);
+}
+
+.table-wrap {
+  max-height: 290px;
+  overflow: auto;
+}
+
+.error {
+  color: #fff;
+  background: var(--red);
+  border-radius: 12px;
+  padding: 0.72rem 0.85rem;
+  font-size: 0.88rem;
+}
+
+.empty {
+  margin-top: 0.8rem;
+  color: var(--text-soft);
+  font-size: 0.86rem;
+}
+
+@media (max-width: 1200px) {
+  .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .cards {
+    grid-template-columns: 1fr;
+  }
+}

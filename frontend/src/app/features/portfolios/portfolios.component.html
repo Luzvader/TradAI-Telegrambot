@@ -1,0 +1,114 @@
+<div class="page">
+  <header class="header-row">
+    <div>
+      <p class="mono overline">portfolio center</p>
+      <h3>Real and backtest books</h3>
+      <p class="subtext">Inspect positions, exposure and running PnL in one place.</p>
+    </div>
+    <button class="btn btn-secondary" (click)="refresh()" [disabled]="loading()">Refresh</button>
+  </header>
+
+  <p class="error" *ngIf="error()">{{ error() }}</p>
+
+  <section class="portfolio-grid">
+    <article class="panel block">
+      <div class="block-head">
+        <div>
+          <h4>Real Portfolio</h4>
+          <p class="caption">{{ data().real?.name || 'not configured' }}</p>
+        </div>
+        <span [class]="labelClass(data().real?.total_pnl_pct)">
+          {{ data().real?.total_pnl_pct || 0 | number:'1.2-2' }}%
+        </span>
+      </div>
+      <div class="meta-row">
+        <div>
+          <small>Assets</small>
+          <strong>{{ asMoney(data().real?.total_assets) }}</strong>
+        </div>
+        <div>
+          <small>Cash</small>
+          <strong>{{ asMoney(data().real?.cash) }}</strong>
+        </div>
+        <div>
+          <small>Strategy</small>
+          <strong class="mono">{{ data().real?.strategy || '-' }}</strong>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Shares</th>
+              <th>Avg</th>
+              <th>Now</th>
+              <th>PnL</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of portfolioRows(data().real); trackBy: trackByTicker">
+              <td class="mono">{{ row.ticker }}</td>
+              <td>{{ row.shares | number:'1.0-2' }}</td>
+              <td>{{ asMoney(row.avg_price) }}</td>
+              <td>{{ asMoney(row.current_price) }}</td>
+              <td>
+                <span [class]="labelClass(row.pnl_pct)">{{ row.pnl_pct | number:'1.2-2' }}%</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="panel block">
+      <div class="block-head">
+        <div>
+          <h4>Backtest Portfolio</h4>
+          <p class="caption">{{ data().backtest?.name || 'not configured' }}</p>
+        </div>
+        <span [class]="labelClass(data().backtest?.total_pnl_pct)">
+          {{ data().backtest?.total_pnl_pct || 0 | number:'1.2-2' }}%
+        </span>
+      </div>
+      <div class="meta-row">
+        <div>
+          <small>Assets</small>
+          <strong>{{ asMoney(data().backtest?.total_assets) }}</strong>
+        </div>
+        <div>
+          <small>Cash</small>
+          <strong>{{ asMoney(data().backtest?.cash) }}</strong>
+        </div>
+        <div>
+          <small>Strategy</small>
+          <strong class="mono">{{ data().backtest?.strategy || '-' }}</strong>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Shares</th>
+              <th>Avg</th>
+              <th>Now</th>
+              <th>PnL</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of portfolioRows(data().backtest); trackBy: trackByTicker">
+              <td class="mono">{{ row.ticker }}</td>
+              <td>{{ row.shares | number:'1.0-2' }}</td>
+              <td>{{ asMoney(row.avg_price) }}</td>
+              <td>{{ asMoney(row.current_price) }}</td>
+              <td>
+                <span [class]="labelClass(row.pnl_pct)">{{ row.pnl_pct | number:'1.2-2' }}%</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+</div>

@@ -1,0 +1,103 @@
+.page {
+  display: grid;
+  gap: 1rem;
+  animation: slideUp 220ms ease;
+}
+
+.overline {
+  font-size: 0.72rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+  margin-bottom: 0.2rem;
+}
+
+h3 {
+  font-size: 1.36rem;
+}
+
+.subtext {
+  margin-top: 0.25rem;
+  color: var(--text-soft);
+}
+
+.form-panel {
+  padding: 1rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+}
+
+label span {
+  display: block;
+  font-size: 0.8rem;
+  margin-bottom: 0.3rem;
+  color: var(--text-soft);
+}
+
+.success,
+.error {
+  border-radius: 12px;
+  padding: 0.72rem 0.85rem;
+  font-size: 0.88rem;
+}
+
+.success {
+  color: #0d5a3b;
+  background: rgba(17, 133, 91, 0.14);
+  border: 1px solid rgba(17, 133, 91, 0.3);
+}
+
+.error {
+  color: #fff;
+  background: var(--red);
+}
+
+.option-grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.strategy-card {
+  padding: 0.88rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.strategy-card h4 {
+  font-size: 1rem;
+}
+
+.strategy-card p {
+  color: var(--text-soft);
+  font-size: 0.86rem;
+  min-height: 2.35rem;
+}
+
+.strategy-card span {
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  color: var(--brand-2);
+}
+
+@media (max-width: 1280px) {
+  .option-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 840px) {
+  .row {
+    grid-template-columns: 1fr;
+  }
+
+  .option-grid {
+    grid-template-columns: 1fr;
+  }
+}

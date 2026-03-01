@@ -1,0 +1,45 @@
+<div class="shell">
+  <aside class="side panel">
+    <div class="brand-block">
+      <p class="mono code">TRADAI CONTROL</p>
+      <h1>AI Trading Desk</h1>
+      <p class="subtitle">
+        Broker-first command center with strategy, backtesting and multi-agent execution.
+      </p>
+    </div>
+
+    <nav class="menu">
+      <a
+        *ngFor="let item of navItems"
+        [routerLink]="item.route"
+        routerLinkActive="active"
+        [routerLinkActiveOptions]="{ exact: item.route === '/' }"
+      >
+        <span>{{ item.label }}</span>
+        <small class="mono">{{ item.hint }}</small>
+      </a>
+    </nav>
+
+    <div class="session-info">
+      <p class="mono tiny">SESSION</p>
+      <p>Authenticated via Telegram web code</p>
+      <a class="logout mono" href="/logout">logout</a>
+    </div>
+  </aside>
+
+  <main class="workspace">
+    <header class="topbar panel">
+      <div>
+        <p class="mono tiny">TRADING 212 PRIMARY</p>
+        <h2>Professional AI dashboard</h2>
+      </div>
+      <div class="status">
+        <span class="dot"></span>
+        <span>live session</span>
+      </div>
+    </header>
+    <section class="content">
+      <router-outlet></router-outlet>
+    </section>
+  </main>
+</div>

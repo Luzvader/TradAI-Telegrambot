@@ -1,0 +1,99 @@
+<div class="page">
+  <header class="header-row">
+    <div>
+      <p class="mono overline">overview</p>
+      <h3>Desk pulse</h3>
+      <p class="subtext">Unified operational snapshot across real and backtest books.</p>
+    </div>
+    <button class="btn btn-secondary" (click)="refresh()" [disabled]="loading()">Refresh</button>
+  </header>
+
+  <p class="error" *ngIf="error()">{{ error() }}</p>
+
+  <section class="cards">
+    <article class="panel card">
+      <h4>Real Equity</h4>
+      <p class="value">{{ asMoney(portfolios().real?.total_assets, 'USD') }}</p>
+      <span
+        class="chip"
+        [class.positive]="(portfolios().real?.total_pnl_pct || 0) >= 0"
+        [class.negative]="(portfolios().real?.total_pnl_pct || 0) < 0"
+      >
+        {{ portfolios().real?.total_pnl_pct || 0 | number:'1.2-2' }}%
+      </span>
+    </article>
+
+    <article class="panel card">
+      <h4>Backtest Equity</h4>
+      <p class="value">{{ asMoney(portfolios().backtest?.total_assets, 'USD') }}</p>
+      <span
+        class="chip"
+        [class.positive]="(portfolios().backtest?.total_pnl_pct || 0) >= 0"
+        [class.negative]="(portfolios().backtest?.total_pnl_pct || 0) < 0"
+      >
+        {{ portfolios().backtest?.total_pnl_pct || 0 | number:'1.2-2' }}%
+      </span>
+    </article>
+
+    <article class="panel card">
+      <h4>OpenAI Cost 30D</h4>
+      <p class="value">{{ asMoney(usage()?.total_cost_usd, 'USD') }}</p>
+      <p class="meta mono">{{ usage()?.total_calls || 0 }} calls</p>
+    </article>
+
+    <article class="panel card">
+      <h4>Recent Signals</h4>
+      <p class="value">{{ signals().length }}</p>
+      <p class="meta mono">latest 12 entries</p>
+    </article>
+  </section>
+
+  <section class="grid">
+    <article class="panel panel-body">
+      <div class="panel-top">
+        <h4>Position Heatmap</h4>
+        <span class="chip">real portfolio</span>
+      </div>
+      <div class="heatmap">
+        <div
+          *ngFor="let p of (portfolios().real?.positions || []).slice(0, 12)"
+          class="tile"
+          [class.gain]="p.pnl_pct >= 0"
+          [class.loss]="p.pnl_pct < 0"
+        >
+          <strong>{{ p.ticker }}</strong>
+          <small>{{ p.pnl_pct | number:'1.1-1' }}%</small>
+        </div>
+      </div>
+      <p class="empty" *ngIf="!(portfolios().real?.positions || []).length">No open positions.</p>
+    </article>
+
+    <article class="panel panel-body">
+      <div class="panel-top">
+        <h4>Signal Feed</h4>
+        <span class="chip">live scoring</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Type</th>
+              <th>Score</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let s of signals()">
+              <td class="mono">{{ s.ticker }}</td>
+              <td>{{ s.type }}</td>
+              <td>{{ s.score || 0 | number:'1.0-0' }}</td>
+              <td>{{ s.created_at }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="empty" *ngIf="!signals().length">No signals yet.</p>
+    </article>
+  </section>
+</div>

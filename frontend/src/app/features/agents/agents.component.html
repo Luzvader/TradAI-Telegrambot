@@ -1,0 +1,68 @@
+<div class="page">
+  <header class="header-row">
+    <div>
+      <p class="mono overline">agent hub</p>
+      <h3>Local and remote AI agents</h3>
+      <p class="subtext">Run specialized analyses with shared broker-aware context.</p>
+    </div>
+    <button class="btn btn-secondary" (click)="loadAgents()" [disabled]="loadingAgents()">
+      Reload registry
+    </button>
+  </header>
+
+  <p class="error" *ngIf="error()">{{ error() }}</p>
+
+  <section class="panel registry">
+    <h4>Registry</h4>
+    <div class="agent-grid">
+      <article class="agent-card" *ngFor="let agent of agents()">
+        <div class="line">
+          <strong>{{ agent.name }}</strong>
+          <span class="chip">{{ agent.kind }}</span>
+        </div>
+        <p>{{ agent.description || 'No description' }}</p>
+        <small class="mono">{{ agent.id }}</small>
+      </article>
+    </div>
+  </section>
+
+  <section class="panel form-panel">
+    <h4>Run analysis</h4>
+    <div class="form-grid">
+      <label>
+        <span>Agent</span>
+        <select [(ngModel)]="form.agent_id">
+          <option *ngFor="let agent of agents()" [value]="agent.id">{{ agent.name }} ({{ agent.kind }})</option>
+        </select>
+      </label>
+      <label>
+        <span>Ticker</span>
+        <input [(ngModel)]="form.ticker">
+      </label>
+      <label>
+        <span>Market</span>
+        <input [(ngModel)]="form.market">
+      </label>
+      <label>
+        <span>Strategy (optional)</span>
+        <input [(ngModel)]="form.strategy" placeholder="value | growth | ...">
+      </label>
+      <label class="span-2">
+        <span>Context for the agent</span>
+        <textarea rows="3" [(ngModel)]="form.context" placeholder="Execution context, constraints, priorities..."></textarea>
+      </label>
+    </div>
+
+    <button class="btn btn-primary" (click)="run()" [disabled]="running() || !form.agent_id">
+      {{ running() ? 'Running agent...' : 'Run Agent' }}
+    </button>
+  </section>
+
+  <section class="panel result" *ngIf="result()">
+    <div class="head">
+      <h4>Agent output</h4>
+      <span class="chip">{{ result()?.agent?.id }}</span>
+    </div>
+    <pre>{{ result()?.analysis }}</pre>
+  </section>
+</div>

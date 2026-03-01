@@ -1,0 +1,41 @@
+<div class="page">
+  <header>
+    <p class="mono overline">strategy desk</p>
+    <h3>Switch active strategy policy</h3>
+    <p class="subtext">Apply tactical posture to real or backtest portfolio in one transaction.</p>
+  </header>
+
+  <section class="panel form-panel">
+    <div class="row">
+      <label>
+        <span>Portfolio</span>
+        <select [(ngModel)]="form.portfolio_type" [disabled]="loading()">
+          <option value="real">Real</option>
+          <option value="backtest">Backtest</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Strategy</span>
+        <select [(ngModel)]="form.strategy" [disabled]="loading()">
+          <option *ngFor="let option of options" [value]="option.value">{{ option.label }}</option>
+        </select>
+      </label>
+    </div>
+
+    <button class="btn btn-primary" (click)="submit()" [disabled]="loading()">
+      {{ loading() ? 'Applying...' : 'Apply Strategy' }}
+    </button>
+  </section>
+
+  <p class="success" *ngIf="success()">{{ success() }}</p>
+  <p class="error" *ngIf="error()">{{ error() }}</p>
+
+  <section class="option-grid">
+    <article class="panel strategy-card" *ngFor="let option of options">
+      <h4>{{ option.label }}</h4>
+      <p>{{ option.profile }}</p>
+      <span class="mono">{{ option.value }}</span>
+    </article>
+  </section>
+</div>
