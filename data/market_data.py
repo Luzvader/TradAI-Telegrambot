@@ -2,6 +2,9 @@
 Obtención de datos de mercado en tiempo real y históricos con yfinance.
 Todas las llamadas a yfinance se ejecutan en thread pool para no
 bloquear el event loop asyncio.
+
+Cuando Trading212 está configurado, los precios de posiciones del broker
+se obtienen directamente de la API (más preciso, sin delay de 15min).
 """
 
 import asyncio
@@ -22,6 +25,31 @@ from config.settings import YFINANCE_MAX_CONCURRENCY
 from data.cache import price_cache, ticker_info_cache
 
 logger = logging.getLogger(__name__)
+
+# Caché local de precios T212 (se rellena con refresh_broker_prices)
+_broker_prices: dict[str, float] = {}
+
+
+async def refresh_broker_prices() -> dict[str, float]:
+    """
+    Refresca los precios desde T212 positions (1 sola llamada API).
+    Devuelve {TICKER: price} y actualiza caché local.
+    """
+    global _broker_prices
+    try:
+        from broker.bridge import get_broker_prices
+        prices = await get_broker_prices()
+        if prices:
+            _broker_prices = prices
+            # También actualizar el price_cache para consistencia
+            for ticker, price in prices.items():
+                cache_key = f"price:{ticker}:auto"
+                price_cache.set(cache_key, price)
+            logger.debug(f"🔄 Precios T212 actualizados: {len(prices)} tickers")
+        return prices
+    except Exception as e:
+        logger.debug(f"Error refrescando precios T212: {e}")
+        return {}
 
 
 def is_market_open(market_key: str) -> bool:
@@ -74,7 +102,7 @@ def get_open_markets() -> list[str]:
 
 
 def _sync_get_current_price(ticker: str, market: str | None = None) -> float | None:
-    """Obtiene el precio actual de un ticker (sync)."""
+    """Obtiene el precio actual de un ticker (sync, yfinance)."""
     cache_key = f"price:{ticker.upper()}:{market or 'auto'}"
     cached = price_cache.get(cache_key)
     if cached is not None:
@@ -95,7 +123,15 @@ def _sync_get_current_price(ticker: str, market: str | None = None) -> float | N
 
 
 async def get_current_price(ticker: str, market: str | None = None) -> float | None:
-    """Obtiene el precio actual de un ticker (async, no bloquea el event loop)."""
+    """
+    Obtiene el precio actual de un ticker (async).
+    Intenta primero desde T212 (si está en posiciones del broker),
+    luego fallback a yfinance.
+    """
+    tk = ticker.upper()
+    # T212 broker price (instantáneo, sin llamada API adicional)
+    if tk in _broker_prices:
+        return _broker_prices[tk]
     return await asyncio.to_thread(_sync_get_current_price, ticker, market)
 
 
@@ -104,22 +140,39 @@ async def get_prices_batch(
     market: str | None = None,
     max_concurrency: int | None = None,
 ) -> dict[str, float]:
-    """Obtiene precios actuales para una lista de tickers (con concurrencia limitada)."""
+    """
+    Obtiene precios actuales para una lista de tickers.
+    1. Primero toma precios de T212 (sin API calls) para los que estén en broker.
+    2. El resto los obtiene de yfinance con concurrencia limitada.
+    """
     prices: dict[str, float] = {}
     tickers = [t.upper() for t in tickers]
 
+    # Fase 1: Precios T212 (gratis, sin llamada API)
+    remaining = []
+    for t in tickers:
+        if t in _broker_prices:
+            prices[t] = _broker_prices[t]
+        else:
+            remaining.append(t)
+
+    if not remaining:
+        return prices
+
+    # Fase 2: yfinance para el resto
     limit = max_concurrency if max_concurrency is not None else YFINANCE_MAX_CONCURRENCY
     sem = asyncio.Semaphore(max(1, int(limit)))
 
     async def _one(ticker: str) -> float | None:
         async with sem:
-            return await get_current_price(ticker, market)
+            return await asyncio.to_thread(_sync_get_current_price, ticker, market)
 
-    tasks = [_one(t) for t in tickers]
+    tasks = [_one(t) for t in remaining]
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    for ticker, result in zip(tickers, results):
-        if isinstance(result, (int, float)) and result is not None:
+    for ticker, result in zip(remaining, results):
+        if isinstance(result, (int, float)) and result:
             prices[ticker] = float(result)
+
     return prices
 
 
@@ -205,7 +258,10 @@ def _sync_get_ticker_info(ticker: str, market: str | None = None) -> dict[str, A
         return result
     except Exception as e:
         logger.error(f"Error obteniendo info de {ticker}: {e}")
-        return {"ticker": ticker.upper(), "error": str(e)}
+        error_result = {"ticker": ticker.upper(), "error": str(e)}
+        # Negative caching: evita repetir peticiones fallidas (TTL 5 min)
+        ticker_info_cache.set(cache_key, error_result, ttl=300)
+        return error_result
 
 
 async def get_ticker_info(ticker: str, market: str | None = None) -> dict[str, Any]:

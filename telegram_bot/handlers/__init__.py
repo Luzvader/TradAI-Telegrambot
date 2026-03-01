@@ -32,6 +32,7 @@ from telegram_bot.handlers.alert_cmds import COMMANDS as _alert_cmds
 from telegram_bot.handlers.objective_cmds import COMMANDS as _objective_cmds
 from telegram_bot.handlers.earnings_cmds import COMMANDS as _earnings_cmds
 from telegram_bot.handlers.broker_cmds import COMMANDS as _broker_cmds
+from telegram_bot.handlers.web_cmds import COMMANDS as _web_cmds
 
 # Callbacks y unknown_command se registran aparte en bot.py
 from telegram_bot.handlers.callbacks import callback_handler  # noqa: F401
@@ -49,4 +50,5 @@ ALL_COMMANDS: list[CommandInfo] = [
     *_objective_cmds,
     *_earnings_cmds,
     *_broker_cmds,
+    *_web_cmds,
 ]

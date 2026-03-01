@@ -66,6 +66,12 @@ async def cmd_broker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await _broker_cancel(update, order_id)
     elif args[0].lower() in ("ordenes", "orders"):
         await _broker_orders(update)
+    elif args[0].lower() in ("dividendos", "dividends"):
+        await _broker_dividends(update)
+    elif args[0].lower() in ("transacciones", "transactions"):
+        await _broker_transactions(update)
+    elif args[0].lower() == "cash":
+        await _broker_cash(update)
     else:
         await update.message.reply_text(
             "❓ Subcomando no reconocido. Opciones:\n"
@@ -75,7 +81,10 @@ async def cmd_broker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "/broker buscar TICKER — Buscar instrumento\n"
             "/broker historial — Historial de órdenes\n"
             "/broker ordenes — Órdenes pendientes\n"
-            "/broker cancelar ID — Cancelar orden",
+            "/broker cancelar ID — Cancelar orden\n"
+            "/broker dividendos — Historial dividendos\n"
+            "/broker transacciones — Historial transacciones\n"
+            "/broker cash — Detalle de cash",
         )
 
 
@@ -360,6 +369,110 @@ async def _broker_cancel(update: Update, order_id: str) -> None:
         await update.message.reply_text(f"✅ Orden `{order_id}` cancelada")
     else:
         await update.message.reply_text(f"❌ Error: {result.error}")
+
+
+async def _broker_dividends(update: Update) -> None:
+    """Muestra historial de dividendos cobrados en T212."""
+    from broker.bridge import get_broker_dividend_history
+
+    await update.message.reply_text("💰 Obteniendo historial de dividendos...")
+
+    divs = await get_broker_dividend_history(limit=30)
+    if not divs:
+        await update.message.reply_text("No hay dividendos registrados en Trading212")
+        return
+
+    total = sum(d.get("amount", 0) for d in divs)
+    lines = [f"💰 *Dividendos Trading212* ({len(divs)} últimos)\n"]
+
+    for d in divs[:20]:
+        ticker = d.get("ticker", "?")
+        amount = d.get("amount", 0)
+        quantity = d.get("quantity", 0)
+        date = d.get("paid_on", "")[:10]
+        lines.append(
+            f"  📌 *{ticker}* — ${amount:.2f} ({quantity:.2f} acc) | {date}"
+        )
+
+    if len(divs) > 20:
+        lines.append(f"  _... y {len(divs) - 20} más_")
+
+    lines.append(f"\n💵 *Total: ${total:,.2f}*")
+    await _send_long(update, "\n".join(lines))
+
+
+async def _broker_transactions(update: Update) -> None:
+    """Muestra historial de transacciones T212."""
+    from broker.bridge import get_broker_transaction_history
+
+    await update.message.reply_text("📜 Obteniendo transacciones...")
+
+    txns = await get_broker_transaction_history(limit=30)
+    if not txns:
+        await update.message.reply_text("No hay transacciones recientes en Trading212")
+        return
+
+    lines = [f"📜 *Transacciones Trading212* ({len(txns)} últimas)\n"]
+
+    for t in txns[:20]:
+        tx_type = t.get("type", "?")
+        amount = t.get("amount", 0)
+        date = t.get("date", "")[:10]
+        emoji = "🟢" if amount > 0 else "🔴" if amount < 0 else "⚪"
+        lines.append(
+            f"  {emoji} {tx_type}: {amount:+,.2f} | {date}"
+        )
+
+    if len(txns) > 20:
+        lines.append(f"  _... y {len(txns) - 20} más_")
+
+    await _send_long(update, "\n".join(lines))
+
+
+async def _broker_cash(update: Update) -> None:
+    """Muestra detalle de cash del broker T212."""
+    from broker.trading212 import get_trading212_client
+
+    client = get_trading212_client()
+    if client is None:
+        await update.message.reply_text("❌ Broker no inicializado")
+        return
+
+    result = await client.get_account()
+    if not result.success:
+        await update.message.reply_text(f"❌ Error: {result.error}")
+        return
+
+    acc = result.data
+    # Obtener datos raw para más detalle
+    raw_result = await client._request(
+        "GET", "/equity/account/summary", rate_key="account"
+    )
+    cash_detail = ""
+    if raw_result.success and raw_result.data:
+        cash_data = raw_result.data.get("cash", {})
+        investments = raw_result.data.get("investments", {})
+        cash_detail = (
+            f"\n📊 *Desglose cash:*\n"
+            f"  Disponible para operar: {cash_data.get('availableToTrade', 0):,.2f}\n"
+            f"  Reservado para órdenes: {cash_data.get('reservedForOrders', 0):,.2f}\n"
+            f"  En Pies: {cash_data.get('inPies', 0):,.2f}\n"
+            f"\n📈 *Inversiones:*\n"
+            f"  Coste total: {investments.get('totalCost', 0):,.2f}\n"
+            f"  Valor actual: {investments.get('currentValue', 0):,.2f}\n"
+            f"  PnL realizado: {investments.get('realizedProfitLoss', 0):+,.2f}\n"
+            f"  PnL no realizado: {investments.get('unrealizedProfitLoss', 0):+,.2f}\n"
+        )
+
+    text = (
+        f"💰 *Trading212 Cash — {acc.mode.upper()}*\n\n"
+        f"💵 Cash total: {acc.cash:,.2f} {acc.currency}\n"
+        f"📊 Invertido: {acc.invested:,.2f} {acc.currency}\n"
+        f"💎 Valor total: {acc.portfolio_value:,.2f} {acc.currency}\n"
+        f"{'🟢' if acc.pnl >= 0 else '🔴'} PnL: {acc.pnl:+,.2f} ({acc.pnl_pct:+.2f}%)\n"
+        f"{cash_detail}"
+    )
+    await _send_long(update, text)
 
 
 # ── Registro de comandos ─────────────────────────────────────

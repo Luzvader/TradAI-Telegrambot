@@ -56,6 +56,17 @@ class WatchlistStatus(str, enum.Enum):
     PROMOTED = "promoted"  # Pasó a cartera
 
 
+class AssetType(str, enum.Enum):
+    STOCK = "stock"  # Acción individual
+    ETF = "etf"      # ETF / fondo cotizado
+
+
+class AutoModeType(str, enum.Enum):
+    OFF = "off"    # Modo automático desactivado
+    ON = "on"      # Full auto: ejecuta operaciones sin intervención
+    SAFE = "safe"  # Auto con confirmación: pide aprobación antes de operar
+
+
 class StrategyType(str, enum.Enum):
     VALUE = "value"               # Value investing clásico
     GROWTH = "growth"             # Crecimiento agresivo
@@ -160,6 +171,7 @@ class WatchlistItem(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     ticker = Column(String(20), nullable=False)
     market = Column(String(20), nullable=False, default="NASDAQ")
+    asset_type = Column(Enum(AssetType), default=AssetType.STOCK, nullable=False)
     sector = Column(String(100), nullable=True)
     reason = Column(Text, nullable=True)
     ai_notes = Column(Text, nullable=True)
@@ -257,7 +269,7 @@ class AutoModeConfig(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     portfolio_id = Column(Integer, ForeignKey("portfolios.id"), nullable=False, unique=True)
-    enabled = Column(Boolean, default=False)
+    mode = Column(Enum(AutoModeType), default=AutoModeType.OFF, nullable=False)
     scan_interval_minutes = Column(Integer, default=60)       # Cada cuánto ejecutar scan
     analyze_interval_minutes = Column(Integer, default=120)   # Cada cuánto re-analizar posiciones
     macro_interval_minutes = Column(Integer, default=240)     # Cada cuánto actualizar macro

@@ -161,7 +161,8 @@ async def _fetch_prices(
     tickers: list[str], period: str
 ) -> dict[str, pd.DataFrame]:
     """Descarga precios históricos en paralelo."""
-    sem = asyncio.Semaphore(5)
+    from config.settings import YFINANCE_MAX_CONCURRENCY
+    sem = asyncio.Semaphore(max(1, int(YFINANCE_MAX_CONCURRENCY)))
     data: dict[str, pd.DataFrame] = {}
 
     async def _one(ticker: str):

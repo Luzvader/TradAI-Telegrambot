@@ -73,8 +73,8 @@ async def get_insider_activity(
                             "shares": int(row.get("Shares", 0) or 0),
                             "value": 0,
                         })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error parseando transacción insider: {e}")
 
         return transactions
 

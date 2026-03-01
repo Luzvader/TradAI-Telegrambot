@@ -92,14 +92,14 @@ async def scan_opportunities(
                         tech_diag = technical_analyst.diagnose(
                             ti, fd.current_price, fd.high_52w, fd.low_52w, fd.avg_50d, fd.avg_200d,
                         )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Error en análisis técnico de {vs.ticker}: {e}")
                 try:
                     price_diag_obj = price_analyst.diagnose(fd)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    logger.debug(f"Error en diagnóstico de precio de {vs.ticker}: {e}")
+        except Exception as e:
+            logger.debug(f"Error obteniendo datos de {vs.ticker}: {e}")
 
         # Análisis IA solo para las 2 mejores oportunidades BUY (ahorro de tokens)
         ai_summary = None

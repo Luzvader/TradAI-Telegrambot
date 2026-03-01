@@ -285,6 +285,17 @@ async def adjust_cash(portfolio_id: int, delta: float) -> float:
         return portfolio.cash
 
 
+async def set_cash(portfolio_id: int, amount: float) -> float:
+    """Establece el cash a un valor absoluto. Devuelve el nuevo cash."""
+    async with async_session_factory() as session:
+        portfolio = await session.get(Portfolio, portfolio_id)
+        if portfolio is None:
+            return 0
+        portfolio.cash = amount
+        await session.commit()
+        return portfolio.cash
+
+
 # ── Portfolio Snapshots (NAV tracking) ───────────────────────
 
 

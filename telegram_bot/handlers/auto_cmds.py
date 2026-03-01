@@ -1,4 +1,4 @@
-"""Handler del modo automático: /auto on|off, intervalos, resumen diario."""
+"""Handler del modo automático: /auto on|off|safe, intervalos, resumen diario."""
 
 import logging
 
@@ -7,18 +7,25 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from database import repository as repo
-from database.models import PortfolioType
+from database.models import AutoModeType, PortfolioType
 from telegram_bot.handlers.registry import CommandInfo
 
 logger = logging.getLogger(__name__)
+
+_MODE_LABELS = {
+    AutoModeType.OFF: "🔴 OFF",
+    AutoModeType.ON: "🟢 ON (Full Auto)",
+    AutoModeType.SAFE: "🛡️ SAFE (Confirmación)",
+}
 
 
 async def cmd_auto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Comando /auto — gestiona el modo automático.
       /auto           → estado actual
-      /auto on        → activar
+      /auto on        → activar (full auto, ejecuta solo)
       /auto off       → desactivar
+      /auto safe      → activar con confirmación para operaciones
       /auto scan 30   → intervalo de scan (min)
       /auto analyze 60 → intervalo de análisis (min)
       /auto macro 120 → intervalo macro (min)
@@ -36,9 +43,9 @@ async def cmd_auto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     config = await repo.get_or_create_auto_mode_config(portfolio.id)
 
     if not args:
-        status = "🟢 ACTIVO" if config.enabled else "🔴 INACTIVO"
+        mode_label = _MODE_LABELS.get(config.mode, "🔴 OFF")
         text = (
-            f"🤖 *MODO AUTOMÁTICO — {status}*\n\n"
+            f"🤖 *MODO AUTOMÁTICO — {mode_label}*\n\n"
             f"📋 Estrategia: {(portfolio.strategy.value if portfolio.strategy else 'value').upper()}\n"
             f"🔍 Scan: cada {config.scan_interval_minutes} min\n"
             f"📊 Análisis: cada {config.analyze_interval_minutes} min\n"
@@ -46,6 +53,10 @@ async def cmd_auto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"📋 Watchlist auto: {'Sí' if config.watchlist_auto_manage else 'No'}\n"
             f"☀️ Resumen diario: {config.daily_summary_hour:02d}:{config.daily_summary_minute:02d}\n"
             f"📡 Señales: {'Sí' if config.notify_signals else 'No'}\n\n"
+            f"*Modos disponibles:*\n"
+            f"  🟢 `on`   — Full auto (ejecuta operaciones solo)\n"
+            f"  🛡️ `safe` — Auto + confirmación antes de operar\n"
+            f"  🔴 `off`  — Desactivado\n\n"
         )
         if config.last_scan_at:
             text += f"Último scan: {config.last_scan_at.strftime('%d/%m %H:%M')}\n"
@@ -54,7 +65,8 @@ async def cmd_auto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if config.last_daily_summary_at:
             text += f"Último resumen: {config.last_daily_summary_at.strftime('%d/%m %H:%M')}\n"
         text += "\n*Ejemplos:*\n"
-        text += "  `/auto on` — Activar\n"
+        text += "  `/auto on` — Full auto\n"
+        text += "  `/auto safe` — Auto con confirmación\n"
         text += "  `/auto off` — Desactivar\n"
         text += "  `/auto scan 30` — Scan cada 30 min\n"
         text += "  `/auto summary 9 0` — Resumen a las 9:00\n"
@@ -64,16 +76,27 @@ async def cmd_auto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     subcmd = args[0].lower()
 
     if subcmd == "on":
-        config = await repo.toggle_auto_mode(portfolio.id, True)
+        config = await repo.set_auto_mode(portfolio.id, AutoModeType.ON)
         await update.message.reply_text(
-            "🤖 *Modo automático ACTIVADO* 🟢\n\n"
+            "🤖 *Modo automático ACTIVADO — 🟢 FULL AUTO*\n\n"
             "Escaneo, análisis, watchlist y señales automáticas.\n"
+            "⚡ Las operaciones se ejecutarán *sin confirmación*.\n"
+            f"☀️ Resumen diario: {config.daily_summary_hour:02d}:{config.daily_summary_minute:02d}",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+    elif subcmd == "safe":
+        config = await repo.set_auto_mode(portfolio.id, AutoModeType.SAFE)
+        await update.message.reply_text(
+            "🤖 *Modo automático ACTIVADO — 🛡️ SAFE*\n\n"
+            "Escaneo, análisis, watchlist y señales automáticas.\n"
+            "🛡️ Las operaciones requieren *tu confirmación* antes de ejecutarse.\n"
             f"☀️ Resumen diario: {config.daily_summary_hour:02d}:{config.daily_summary_minute:02d}",
             parse_mode=ParseMode.MARKDOWN,
         )
 
     elif subcmd == "off":
-        await repo.toggle_auto_mode(portfolio.id, False)
+        await repo.set_auto_mode(portfolio.id, AutoModeType.OFF)
         await update.message.reply_text(
             "🤖 *Modo automático DESACTIVADO* 🔴",
             parse_mode=ParseMode.MARKDOWN,
@@ -158,5 +181,5 @@ async def cmd_auto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ── Registro de comandos ─────────────────────────────────────
 
 COMMANDS: list[CommandInfo] = [
-    CommandInfo("auto", cmd_auto, "Modo automático: /auto on|off"),
+    CommandInfo("auto", cmd_auto, "Modo automático: /auto on|off|safe"),
 ]

@@ -1,9 +1,13 @@
 """
 Sistema de caché en memoria con TTL para reducir llamadas redundantes
 a yfinance y OpenAI.
+
+Thread-safe: protegido con threading.Lock para accesos concurrentes
+desde asyncio.to_thread().
 """
 
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -19,7 +23,7 @@ class CacheEntry:
 
 
 class TTLCache:
-    """Caché en memoria con TTL (Time-To-Live) por clave."""
+    """Caché en memoria con TTL (Time-To-Live) por clave, thread-safe."""
 
     def __init__(self, default_ttl: int = 300):
         """
@@ -30,67 +34,75 @@ class TTLCache:
         self._default_ttl = default_ttl
         self._hits = 0
         self._misses = 0
+        self._lock = threading.Lock()
 
     def get(self, key: str) -> Any | None:
         """Obtiene un valor del caché si no ha expirado."""
-        entry = self._store.get(key)
-        if entry is None:
-            self._misses += 1
-            return None
-        if time.monotonic() > entry.expires_at:
-            del self._store[key]
-            self._misses += 1
-            return None
-        self._hits += 1
-        return entry.value
+        with self._lock:
+            entry = self._store.get(key)
+            if entry is None:
+                self._misses += 1
+                return None
+            if time.monotonic() > entry.expires_at:
+                del self._store[key]
+                self._misses += 1
+                return None
+            self._hits += 1
+            return entry.value
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         """Almacena un valor con TTL opcional."""
         ttl = ttl if ttl is not None else self._default_ttl
-        self._store[key] = CacheEntry(
-            value=value,
-            expires_at=time.monotonic() + ttl,
-        )
+        with self._lock:
+            self._store[key] = CacheEntry(
+                value=value,
+                expires_at=time.monotonic() + ttl,
+            )
 
     def invalidate(self, key: str) -> bool:
         """Elimina una clave del caché."""
-        if key in self._store:
-            del self._store[key]
-            return True
-        return False
+        with self._lock:
+            if key in self._store:
+                del self._store[key]
+                return True
+            return False
 
     def invalidate_prefix(self, prefix: str) -> int:
         """Elimina todas las claves que empiezan por un prefijo."""
-        keys = [k for k in self._store if k.startswith(prefix)]
-        for k in keys:
-            del self._store[k]
-        return len(keys)
+        with self._lock:
+            keys = [k for k in self._store if k.startswith(prefix)]
+            for k in keys:
+                del self._store[k]
+            return len(keys)
 
     def clear(self) -> None:
         """Limpia todo el caché."""
-        self._store.clear()
-        self._hits = 0
-        self._misses = 0
+        with self._lock:
+            self._store.clear()
+            self._hits = 0
+            self._misses = 0
 
     def cleanup(self) -> int:
         """Elimina entradas expiradas. Devuelve cuántas se eliminaron."""
-        now = time.monotonic()
-        expired = [k for k, v in self._store.items() if now > v.expires_at]
-        for k in expired:
-            del self._store[k]
-        return len(expired)
+        with self._lock:
+            now = time.monotonic()
+            expired = [k for k, v in self._store.items() if now > v.expires_at]
+            for k in expired:
+                del self._store[k]
+            return len(expired)
 
     @property
     def stats(self) -> dict[str, int | float]:
         """Estadísticas del caché."""
-        return {
-            "entries": len(self._store),
-            "hits": self._hits,
-            "misses": self._misses,
-            "hit_rate": round(
-                self._hits / max(self._hits + self._misses, 1) * 100, 1
-            ),
-        }
+        with self._lock:
+            return {
+                "entries": len(self._store),
+                "hits": self._hits,
+                "misses": self._misses,
+                "hit_rate": round(
+                    self._hits / max(self._hits + self._misses, 1) * 100, 1
+                ),
+            }
 
 
 # ── Instancias globales ─────────────────────────────────────

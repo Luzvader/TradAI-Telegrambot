@@ -6,7 +6,7 @@ Centraliza el envío de mensajes por Telegram y otros canales.
 import logging
 from typing import Any
 
-from telegram import Bot
+from telegram import Bot, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
 from config.settings import TELEGRAM_CHAT_ID
@@ -31,7 +31,11 @@ def get_notification_bot() -> Bot | None:
     return _bot
 
 
-async def notify_telegram(text: str, chat_id: str | None = None) -> None:
+async def notify_telegram(
+    text: str,
+    chat_id: str | None = None,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
     """Envía notificación por Telegram con soporte de mensajes largos."""
     target_chat = chat_id or TELEGRAM_CHAT_ID
     if _bot is None or not target_chat:
@@ -41,11 +45,14 @@ async def notify_telegram(text: str, chat_id: str | None = None) -> None:
         max_len = 4000
         for i in range(0, len(text), max_len):
             chunk = text[i:i + max_len]
+            # Solo poner botones en el último chunk
+            markup = reply_markup if (i + max_len >= len(text)) else None
             try:
                 await _bot.send_message(
                     chat_id=target_chat,
                     text=chunk,
                     parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=markup,
                 )
             except Exception:
                 # Fallback sin parse_mode si falla el Markdown
@@ -67,3 +74,11 @@ async def notify(text: str) -> None:
             await channel.send(text)
         except Exception as e:
             logger.warning(f"Error en canal de notificación {channel}: {e}")
+
+
+async def notify_with_buttons(
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    """Envía notificación por Telegram con botones inline."""
+    await notify_telegram(text, reply_markup=reply_markup)

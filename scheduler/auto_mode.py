@@ -7,7 +7,12 @@ Modo Automático – ejecuta ciclos periódicos de análisis completo:
   • Resumen diario a las 9:00 (hora España)
   • Envío de señales relevantes por Telegram
 
-Se activa/desactiva con /auto on|off y se configura con /auto config.
+Se configura con /auto on|off|safe y /auto config.
+
+Modos:
+  • OFF  – desactivado
+  • ON   – full auto, ejecuta operaciones sin intervención
+  • SAFE – auto con confirmación, pide aprobación antes de operar
 """
 
 import json
@@ -15,22 +20,29 @@ import logging
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
 from ai.analyst import analyze_with_context, get_macro_analysis
 from ai.watchlist import ai_generate_watchlist, refresh_watchlist_analysis
+from broker.bridge import (
+    get_broker_account_cash,
+    sync_cash_from_broker,
+)
 from config import settings
 from config.markets import market_display
 from config.settings import TIMEZONE
+from data.market_data import refresh_broker_prices
 from data.news import save_context_snapshot
 from database import repository as repo
-from database.models import PortfolioType
+from database.models import AutoModeType, PortfolioType
 from portfolio.portfolio_manager import (
     check_alerts,
+    execute_buy,
+    execute_sell,
     get_portfolio_summary,
     update_all_prices,
 )
-from notifications import notify as _notify, set_notification_bot
+from notifications import notify as _notify, notify_with_buttons, set_notification_bot
 from signals.signal_engine import (
 
     analyze_ticker,
@@ -76,9 +88,12 @@ async def _process_auto_portfolio(config, now: datetime) -> None:
     """Procesa un portfolio en modo auto."""
     portfolio_id = config.portfolio_id
 
+    # ── Sync con Trading212 al inicio de cada ciclo ──
+    await _auto_sync_broker(portfolio_id)
+
     # ── Scan de oportunidades ──
     if _should_run(config.last_scan_at, config.scan_interval_minutes, now):
-        await _auto_scan(portfolio_id)
+        await _auto_scan(portfolio_id, config.mode)
         await repo.update_auto_mode_timestamps(
             portfolio_id, last_scan_at=now
         )
@@ -129,9 +144,38 @@ def _should_run(
 # ── Tareas automáticas ───────────────────────────────────────
 
 
-async def _auto_scan(portfolio_id: int) -> None:
-    """Ejecuta un scan de oportunidades y notifica las mejores."""
-    logger.info(f"🤖 [AUTO] Escaneando oportunidades para portfolio {portfolio_id}")
+async def _auto_sync_broker(portfolio_id: int) -> None:
+    """
+    Sincroniza precios y cash desde Trading212 al inicio del ciclo auto.
+    Silencioso: no notifica al usuario, solo actualiza datos internos.
+    """
+    try:
+        # Refrescar precios T212 para que get_prices_batch los use
+        await refresh_broker_prices()
+    except Exception as e:
+        logger.debug(f"[AUTO] Error refrescando precios T212: {e}")
+
+    try:
+        # Sincronizar cash real del broker con la BD local
+        portfolio = await repo.get_portfolio(portfolio_id)
+        if portfolio and portfolio.portfolio_type == PortfolioType.REAL:
+            result = await sync_cash_from_broker(portfolio_id)
+            if result.get("success") and abs(result.get("diff", 0)) > 1.0:
+                logger.info(
+                    f"[AUTO] Cash sincronizado: "
+                    f"{result['old_cash']:.2f} → {result['new_cash']:.2f}"
+                )
+    except Exception as e:
+        logger.debug(f"[AUTO] Error sincronizando cash: {e}")
+
+
+async def _auto_scan(portfolio_id: int, mode: AutoModeType) -> None:
+    """Ejecuta un scan de oportunidades.
+
+    - ON:   notifica y ejecuta compras automáticamente.
+    - SAFE: notifica y envía botones de confirmación.
+    """
+    logger.info(f"🤖 [AUTO-{mode.value.upper()}] Escaneando oportunidades para portfolio {portfolio_id}")
 
     try:
         opportunities = await scan_opportunities(
@@ -142,16 +186,32 @@ async def _auto_scan(portfolio_id: int) -> None:
 
         # Filtrar solo BUY con score alto
         strong = [o for o in opportunities if o["signal"] == "BUY" and o["overall_score"] >= settings.SIGNAL_BUY_THRESHOLD]
-        if strong:
-            text = "🤖 *MODO AUTO — Oportunidades detectadas*\n\n"
-            for i, opp in enumerate(strong, 1):
-                price_str = f"{opp['price']:.2f}$" if opp.get('price') else "N/A"
-                text += (
-                    f"{i}. 🟢 *${opp['ticker']}* — Score: {opp['overall_score']:.0f}/100 | Precio: {price_str}\n"
-                    f"   V:{opp['value_score']:.0f} Q:{opp['quality_score']:.0f} S:{opp['safety_score']:.0f}\n"
-                    f"   MoS: {opp.get('margin_of_safety', 'N/A')}%\n\n"
-                )
+        if not strong:
+            return
+
+        mode_label = "🟢 ON" if mode == AutoModeType.ON else "🛡️ SAFE"
+        text = f"🤖 *MODO AUTO ({mode_label}) — Oportunidades detectadas*\n\n"
+        for i, opp in enumerate(strong, 1):
+            price_str = f"{opp['price']:.2f}$" if opp.get('price') else "N/A"
+            text += (
+                f"{i}. 🟢 *${opp['ticker']}* — Score: {opp['overall_score']:.0f}/100 | Precio: {price_str}\n"
+                f"   V:{opp['value_score']:.0f} Q:{opp['quality_score']:.0f} S:{opp['safety_score']:.0f}\n"
+                f"   MoS: {opp.get('margin_of_safety', 'N/A')}%\n\n"
+            )
+
+        if mode == AutoModeType.ON:
+            # Full auto: ejecutar compras y notificar resultado
+            for opp in strong:
+                await _auto_execute_buy(portfolio_id, opp)
+            text += "_Operaciones ejecutadas automáticamente._\n"
             await _notify(text)
+
+        elif mode == AutoModeType.SAFE:
+            # Safe: enviar cada oportunidad con botones de confirmación
+            await _notify(text)
+            for opp in strong:
+                await _send_buy_confirmation(portfolio_id, opp)
+
     except Exception as e:
         logger.error(f"Error en auto_scan: {e}")
 
@@ -171,8 +231,13 @@ async def _auto_macro(portfolio_id: int) -> None:
 
 
 async def _auto_analyze_positions(portfolio_id: int, config) -> None:
-    """Re-analiza todas las posiciones y envía señales activas."""
-    logger.info(f"🤖 [AUTO] Analizando posiciones del portfolio {portfolio_id}")
+    """Re-analiza todas las posiciones y envía señales activas.
+
+    - ON:   ejecuta ventas automáticamente si hay señal SELL.
+    - SAFE: envía señales con botones de confirmación.
+    """
+    mode = config.mode
+    logger.info(f"🤖 [AUTO-{mode.value.upper()}] Analizando posiciones del portfolio {portfolio_id}")
 
     try:
         # Actualizar precios
@@ -188,7 +253,8 @@ async def _auto_analyze_positions(portfolio_id: int, config) -> None:
         if config.notify_signals:
             actionable = [s for s in signals if s.get("type") in ("BUY", "SELL")]
             if actionable:
-                text = "🤖 *MODO AUTO — Señales*\n\n"
+                mode_label = "🟢 ON" if mode == AutoModeType.ON else "🛡️ SAFE"
+                text = f"🤖 *MODO AUTO ({mode_label}) — Señales*\n\n"
                 for s in actionable:
                     emoji = "🟢" if s["type"] == "BUY" else "🔴"
                     price_str = f"{s['price']:.2f}$" if s.get('price') else "N/A"
@@ -199,11 +265,29 @@ async def _auto_analyze_positions(portfolio_id: int, config) -> None:
                     if s.get("pnl_pct") is not None:
                         text += f"   PnL: {s['pnl_pct']}%\n"
                     text += "\n"
-                await _notify(text)
+
+                if mode == AutoModeType.ON:
+                    # Full auto: ejecutar operaciones
+                    for s in actionable:
+                        if s["type"] == "SELL":
+                            await _auto_execute_sell(portfolio_id, s)
+                        elif s["type"] == "BUY":
+                            await _auto_execute_buy(portfolio_id, s)
+                    text += "_Operaciones ejecutadas automáticamente._\n"
+                    await _notify(text)
+
+                elif mode == AutoModeType.SAFE:
+                    # Safe: notificar y pedir confirmación
+                    await _notify(text)
+                    for s in actionable:
+                        if s["type"] == "SELL":
+                            await _send_sell_confirmation(portfolio_id, s)
+                        elif s["type"] == "BUY":
+                            await _send_buy_confirmation(portfolio_id, s)
 
             # Alertas SL/TP
             if alerts:
-                text = "🤖 *MODO AUTO — ⚠️ Alertas*\n\n"
+                text = f"🤖 *MODO AUTO — ⚠️ Alertas*\n\n"
                 for a in alerts:
                     text += (
                         f"{a['type']} *${a['ticker']}*\n"
@@ -213,6 +297,197 @@ async def _auto_analyze_positions(portfolio_id: int, config) -> None:
 
     except Exception as e:
         logger.error(f"Error en auto_analyze_positions: {e}")
+
+
+# ── Ejecución automática (modo ON) ──────────────────────────
+
+
+async def _auto_execute_buy(portfolio_id: int, signal: dict) -> None:
+    """Ejecuta una compra automática basada en una señal."""
+    ticker = signal.get("ticker", "")
+    price = signal.get("price")
+    market = signal.get("market", "NASDAQ")
+    if not ticker or not price:
+        return
+
+    try:
+        # Calcular tamaño de posición basado en el portfolio
+        portfolio = await repo.get_portfolio(portfolio_id)
+        if portfolio is None or portfolio.cash <= 0:
+            logger.warning(f"[AUTO-ON] Sin cash disponible para comprar {ticker}")
+            return
+
+        # Usar un máximo del 5% del valor total o el cash disponible
+        summary = await get_portfolio_summary(portfolio_id)
+        max_amount = min(
+            portfolio.cash,
+            summary["total_value"] * 0.05,
+        )
+        if max_amount < 10:
+            return
+
+        shares = max_amount / price
+        result = await execute_buy(
+            portfolio_id=portfolio_id,
+            ticker=ticker,
+            market=market,
+            price=price,
+            shares=shares,
+        )
+
+        if result["success"]:
+            text = (
+                f"🤖 *AUTO-ON — Compra ejecutada* ✅\n\n"
+                f"📌 *${ticker}* ({market})\n"
+                f"💵 Precio: {price:.2f}$\n"
+                f"📊 Acciones: {result.get('shares', shares):.4f}\n"
+                f"💰 Total: {result.get('amount', 0):.2f}$\n"
+            )
+            if result.get("broker_executed"):
+                text += "🏦 Broker: Trading212 ✅\n"
+            await _notify(text)
+        else:
+            logger.error(f"[AUTO-ON] Error comprando {ticker}: {result.get('error')}")
+            await _notify(f"🤖 ❌ AUTO-ON — Error comprando *${ticker}*: {result.get('error')}")
+
+    except Exception as e:
+        logger.error(f"[AUTO-ON] Excepción comprando {ticker}: {e}")
+
+
+async def _auto_execute_sell(portfolio_id: int, signal: dict) -> None:
+    """Ejecuta una venta automática basada en una señal."""
+    ticker = signal.get("ticker", "")
+    price = signal.get("price")
+    market = signal.get("market", "NASDAQ")
+    if not ticker or not price:
+        return
+
+    try:
+        # Obtener posición actual
+        positions = await repo.get_open_positions(portfolio_id)
+        position = next((p for p in positions if p.ticker == ticker), None)
+        if position is None or position.shares <= 0:
+            return
+
+        result = await execute_sell(
+            portfolio_id=portfolio_id,
+            ticker=ticker,
+            market=market,
+            price=price,
+            shares_to_sell=position.shares,  # Venta total
+        )
+
+        if result["success"]:
+            pnl = result.get("pnl", 0)
+            pnl_pct = result.get("pnl_pct", 0)
+            pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+            text = (
+                f"🤖 *AUTO-ON — Venta ejecutada* ✅\n\n"
+                f"📌 *${ticker}* ({market})\n"
+                f"💵 Precio: {price:.2f}$\n"
+                f"📊 Acciones: {result.get('shares_sold', position.shares):.4f}\n"
+                f"{pnl_emoji} PnL: {pnl:+.2f}$ ({pnl_pct:+.2f}%)\n"
+            )
+            if result.get("broker_executed"):
+                text += "🏦 Broker: Trading212 ✅\n"
+            await _notify(text)
+        else:
+            logger.error(f"[AUTO-ON] Error vendiendo {ticker}: {result.get('error')}")
+            await _notify(f"🤖 ❌ AUTO-ON — Error vendiendo *${ticker}*: {result.get('error')}")
+
+    except Exception as e:
+        logger.error(f"[AUTO-ON] Excepción vendiendo {ticker}: {e}")
+
+
+# ── Confirmación interactiva (modo SAFE) ────────────────────
+
+
+async def _send_buy_confirmation(portfolio_id: int, signal: dict) -> None:
+    """Envía un mensaje con botones para confirmar/rechazar una compra."""
+    ticker = signal.get("ticker", "")
+    price = signal.get("price")
+    market = signal.get("market", "NASDAQ")
+    score = signal.get("overall_score", signal.get("score", "?"))
+    if not ticker or not price:
+        return
+
+    # Calcular monto sugerido (5% del portfolio)
+    try:
+        portfolio = await repo.get_portfolio(portfolio_id)
+        if portfolio is None or portfolio.cash <= 0:
+            return
+        summary = await get_portfolio_summary(portfolio_id)
+        amount = min(portfolio.cash, summary["total_value"] * 0.05)
+        shares = amount / price
+    except Exception:
+        shares = 0
+        amount = 0
+
+    text = (
+        f"🛡️ *MODO SAFE — ¿Confirmar COMPRA?*\n\n"
+        f"📌 *${ticker}* ({market})\n"
+        f"💵 Precio: {price:.2f}$\n"
+        f"📊 Acciones: ~{shares:.4f} (~{amount:.2f}$)\n"
+        f"⭐ Score: {score}\n"
+    )
+    reason = signal.get("reasoning", signal.get("reason", ""))
+    if reason:
+        text += f"📝 {reason[:120]}\n"
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "✅ Comprar",
+                callback_data=f"auto_buy:{ticker}:{market}:{shares:.6f}:{price:.2f}",
+            ),
+            InlineKeyboardButton("❌ Rechazar", callback_data="auto_reject"),
+        ]
+    ])
+    await notify_with_buttons(text, reply_markup=keyboard)
+
+
+async def _send_sell_confirmation(portfolio_id: int, signal: dict) -> None:
+    """Envía un mensaje con botones para confirmar/rechazar una venta."""
+    ticker = signal.get("ticker", "")
+    price = signal.get("price")
+    market = signal.get("market", "NASDAQ")
+    if not ticker or not price:
+        return
+
+    # Obtener posición
+    try:
+        positions = await repo.get_open_positions(portfolio_id)
+        position = next((p for p in positions if p.ticker == ticker), None)
+        if position is None or position.shares <= 0:
+            return
+        shares = position.shares
+        pnl_pct = ((price - position.avg_price) / position.avg_price * 100) if position.avg_price else 0
+    except Exception:
+        shares = 0
+        pnl_pct = 0
+
+    pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
+    text = (
+        f"🛡️ *MODO SAFE — ¿Confirmar VENTA?*\n\n"
+        f"📌 *${ticker}* ({market})\n"
+        f"💵 Precio: {price:.2f}$\n"
+        f"📊 Acciones: {shares:.4f}\n"
+        f"{pnl_emoji} PnL estimado: {pnl_pct:+.2f}%\n"
+    )
+    reason = signal.get("reasoning", signal.get("reason", ""))
+    if reason:
+        text += f"📝 {reason[:120]}\n"
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "✅ Vender",
+                callback_data=f"auto_sell:{ticker}:{market}:{shares:.6f}:{price:.2f}",
+            ),
+            InlineKeyboardButton("❌ Rechazar", callback_data="auto_reject"),
+        ]
+    ])
+    await notify_with_buttons(text, reply_markup=keyboard)
 
 
 async def _auto_manage_watchlist(portfolio_id: int, config) -> None:
@@ -291,8 +566,20 @@ async def _send_daily_summary(portfolio_id: int) -> None:
         f"   Valor: {summary['total_value']:,.2f}$\n"
         f"   Invertido: {summary['total_invested']:,.2f}$\n"
         f"   PnL: {summary['total_pnl']:+,.2f}$ ({summary['total_pnl_pct']:+.2f}%)\n"
-        f"   Posiciones: {summary['num_positions']}\n\n"
+        f"   Posiciones: {summary['num_positions']}\n"
     )
+
+    # Datos de cuenta T212 (cash real, PnL real)
+    broker_acc = await get_broker_account_cash()
+    if broker_acc:
+        text += (
+            f"\n🏦 *Trading212 ({broker_acc.get('currency', 'EUR')})*\n"
+            f"   Cash real: {broker_acc['cash']:,.2f}\n"
+            f"   Invertido: {broker_acc['invested']:,.2f}\n"
+            f"   Valor total: {broker_acc['portfolio_value']:,.2f}\n"
+            f"   PnL broker: {broker_acc['pnl']:+,.2f} ({broker_acc.get('pnl_pct', 0):+.2f}%)\n"
+        )
+    text += "\n"
 
     # Detalle de posiciones
     if summary["positions"]:
@@ -393,6 +680,9 @@ Responde (máx 150 palabras):
     except Exception as e:
         logger.warning(f"Error en análisis IA del resumen diario: {e}")
 
-    text += f"\n⚙️ _Modo auto activo | /auto off para desactivar_"
+    # Obtener config para mostrar el modo
+    config = await repo.get_auto_mode_config(portfolio_id)
+    mode_str = config.mode.value.upper() if config else "ON"
+    text += f"\n⚙️ _Modo auto {mode_str} activo | /auto off para desactivar_"
 
     await _notify(text)

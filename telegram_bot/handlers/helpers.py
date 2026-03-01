@@ -5,6 +5,13 @@ from typing import Any
 
 from telegram import Update
 from telegram.constants import ParseMode
+from telegram.helpers import escape_markdown
+
+from config.markets import (
+    DEFAULT_TICKER_MARKET,
+    normalize_ticker,
+    split_yfinance_suffix,
+)
 
 # ── Constantes de validación ─────────────────────────────────
 MAX_SHARES = 1_000_000
@@ -13,10 +20,22 @@ MAX_PRICE = 1_000_000
 
 
 def _escape_md(text: str) -> str:
-    """Escapa caracteres especiales de Telegram MarkdownV1."""
-    for ch in ("_", "*", "`", "["):
-        text = text.replace(ch, f"\\{ch}")
-    return text
+    """Escapa caracteres especiales de Telegram MarkdownV1.
+
+    Usa la implementación oficial de python-telegram-bot.
+    """
+    return escape_markdown(str(text), version=1)
+
+
+def resolve_ticker(raw: str) -> tuple[str, str]:
+    """Normaliza un ticker crudo y resuelve su mercado.
+
+    Devuelve (ticker_normalizado, mercado).
+    """
+    base, inferred_market = split_yfinance_suffix(raw)
+    ticker = normalize_ticker(base)
+    market = inferred_market or DEFAULT_TICKER_MARKET.get(ticker, "NASDAQ")
+    return ticker, market
 
 
 def _parse_buy_sell(text: str) -> dict[str, Any] | None:

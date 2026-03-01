@@ -7,6 +7,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-tradai}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradai_password}
       POSTGRES_DB: ${POSTGRES_DB:-tradai_db}
+    # Exponer PostgreSQL al host para Alembic y desarrollo local
     ports:
       - "5432:5432"
     volumes:
@@ -32,6 +33,11 @@ services:
       - "${WEB_PORT:-8080}:${WEB_PORT:-8080}"
     volumes:
       - ./logs:/app/logs
+    # Limitar recursos para evitar abusos
+    deploy:
+      resources:
+        limits:
+          memory: 1G
 
 volumes:
   postgres_data:

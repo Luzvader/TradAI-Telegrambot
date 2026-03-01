@@ -365,8 +365,8 @@ RESUMEN: Una lección general del lote en 1 frase.
                 bd = datetime.fromisoformat(buy_date)
                 sd = datetime.fromisoformat(sell_date)
                 holding_days = (sd - bd).days
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error parseando fechas de operación: {e}")
 
         log = LearningLog(
             ticker=sell["ticker"].upper(),

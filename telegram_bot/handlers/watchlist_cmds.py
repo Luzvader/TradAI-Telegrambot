@@ -42,13 +42,16 @@ async def cmd_watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         added = await ai_generate_watchlist(portfolio_tickers)
 
         if added:
-            text = "✅ *Watchlist generada:*\n\n"
+            stock_count = sum(1 for a in added if a.get('asset_type') == 'stock')
+            etf_count = sum(1 for a in added if a.get('asset_type') == 'etf')
+            text = f"✅ *Watchlist generada:* {len(added)} items ({stock_count} acciones, {etf_count} ETFs)\n\n"
             for item in added:
                 conv = f" | Convicción: {item['conviction']}/10" if item.get('conviction') else ""
+                type_emoji = "📦" if item.get('asset_type') == 'etf' else "📊"
                 text += (
-                    f"📌 *${item['ticker']}* ({item['market']}){conv}\n"
+                    f"{type_emoji} *${item['ticker']}* ({item['market']}){conv}\n"
                     f"   Sector: {item.get('sector', 'N/A')}\n"
-                    f"   📝 {item['reason']}\n"
+                    f"   📝 {item['reason'][:120]}\n"
                 )
                 if item.get("thesis"):
                     text += f"   Tesis: {item['thesis'][:100]}\n"
@@ -65,7 +68,7 @@ async def cmd_watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                     text += f"   ⚠️ {item['risks'][:80]}\n"
                 text += "\n"
         else:
-            text = "⚠️ No se pudieron añadir tickers. Puede estar llena (máx 5)."
+            text = "⚠️ No se pudieron añadir tickers. Puede estar llena (máx 100)."
         await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
     elif subcmd in ("quitar", "remove", "rm"):

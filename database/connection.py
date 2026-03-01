@@ -3,6 +3,7 @@ Conexión asíncrona a PostgreSQL con SQLAlchemy 2.x.
 Incluye reconexión automática y health check.
 """
 
+import enum
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -83,39 +84,44 @@ async def init_db() -> None:
                 if col.primary_key:
                     continue
                 try:
-                    check = text(
-                        "SELECT 1 FROM information_schema.columns "
-                        "WHERE table_name = :t AND column_name = :c"
-                    )
-                    result = await conn.execute(
-                        check, {"t": table.name, "c": col.name}
-                    )
-                    if result.scalar() is not None:
-                        continue  # columna ya existe
+                    # Usar savepoint para que un fallo no aborte toda la transacción
+                    async with conn.begin_nested():
+                        check = text(
+                            "SELECT 1 FROM information_schema.columns "
+                            "WHERE table_name = :t AND column_name = :c"
+                        )
+                        result = await conn.execute(
+                            check, {"t": table.name, "c": col.name}
+                        )
+                        if result.scalar() is not None:
+                            continue  # columna ya existe
 
-                    # Determinar tipo SQL
-                    col_type = col.type.compile(engine.dialect)
-                    nullable = "" if col.nullable else " NOT NULL"
-                    default = ""
-                    if col.default is not None:
-                        dv = col.default.arg
-                        if callable(dv):
-                            # Lambdas (datetime.now) → no se pueden poner como DEFAULT SQL
-                            nullable = ""  # forzar nullable para evitar error
-                        elif isinstance(dv, (int, float)):
-                            default = f" DEFAULT {dv}"
-                        elif isinstance(dv, str):
-                            default = f" DEFAULT '{dv}'"
-                        elif isinstance(dv, bool):
-                            default = f" DEFAULT {'true' if dv else 'false'}"
+                        # Determinar tipo SQL
+                        col_type = col.type.compile(engine.dialect)
+                        nullable = "" if col.nullable else " NOT NULL"
+                        default = ""
+                        if col.default is not None:
+                            dv = col.default.arg
+                            if callable(dv):
+                                # Lambdas (datetime.now) → no se pueden poner como DEFAULT SQL
+                                nullable = ""  # forzar nullable para evitar error
+                            elif isinstance(dv, enum.Enum):
+                                # Python enums → usar el .value (ej. AssetType.STOCK → 'stock')
+                                default = f" DEFAULT '{dv.value}'"
+                            elif isinstance(dv, bool):
+                                default = f" DEFAULT {'true' if dv else 'false'}"
+                            elif isinstance(dv, (int, float)):
+                                default = f" DEFAULT {dv}"
+                            elif isinstance(dv, str):
+                                default = f" DEFAULT '{dv}'"
 
-                    # Si NOT NULL sin default, quitar NOT NULL (la tabla puede tener filas)
-                    if nullable == " NOT NULL" and not default:
-                        nullable = ""
+                        # Si NOT NULL sin default, quitar NOT NULL (la tabla puede tener filas)
+                        if nullable == " NOT NULL" and not default:
+                            nullable = ""
 
-                    ddl = f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {col_type}{nullable}{default}'
-                    await conn.execute(text(ddl))
-                    logger.info(f"🔧 Columna añadida: {table.name}.{col.name}")
+                        ddl = f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {col_type}{nullable}{default}'
+                        await conn.execute(text(ddl))
+                        logger.info(f"🔧 Columna añadida: {table.name}.{col.name}")
                 except Exception as e:
                     logger.warning(f"Error migrando {table.name}.{col.name}: {e}")
 

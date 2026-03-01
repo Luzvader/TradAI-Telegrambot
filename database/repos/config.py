@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from database.connection import async_session_factory
 from database.models import (
     AutoModeConfig,
+    AutoModeType,
     CustomAlert,
     InvestmentObjective,
 )
@@ -40,19 +41,19 @@ async def get_or_create_auto_mode_config(portfolio_id: int) -> AutoModeConfig:
         result = await session.execute(stmt)
         config = result.scalar_one_or_none()
         if config is None:
-            config = AutoModeConfig(portfolio_id=portfolio_id)
+            config = AutoModeConfig(portfolio_id=portfolio_id, mode=AutoModeType.OFF)
             session.add(config)
             await session.commit()
             await session.refresh(config)
         return config
 
 
-async def toggle_auto_mode(portfolio_id: int, enabled: bool) -> AutoModeConfig:
-    """Activa o desactiva el modo auto.
+async def set_auto_mode(portfolio_id: int, mode: AutoModeType) -> AutoModeConfig:
+    """Establece el modo automático: OFF, ON o SAFE.
 
-    Al activar, inicializa los timestamps de última ejecución a 'ahora'
-    para que cada tarea espere su intervalo completo antes de ejecutarse
-    por primera vez (evita que todas disparen a la vez en el primer ciclo).
+    Al activar (ON o SAFE), inicializa los timestamps de última ejecución
+    a 'ahora' para que cada tarea espere su intervalo completo antes de
+    ejecutarse por primera vez (evita que todas disparen a la vez).
     """
     async with async_session_factory() as session:
         stmt = select(AutoModeConfig).where(
@@ -61,26 +62,34 @@ async def toggle_auto_mode(portfolio_id: int, enabled: bool) -> AutoModeConfig:
         result = await session.execute(stmt)
         config = result.scalar_one_or_none()
         now = datetime.now(UTC)
+        active = mode != AutoModeType.OFF
         if config is None:
             config = AutoModeConfig(
                 portfolio_id=portfolio_id,
-                enabled=enabled,
-                last_scan_at=now if enabled else None,
-                last_analyze_at=now if enabled else None,
-                last_macro_at=now if enabled else None,
+                mode=mode,
+                last_scan_at=now if active else None,
+                last_analyze_at=now if active else None,
+                last_macro_at=now if active else None,
             )
             session.add(config)
         else:
-            config.enabled = enabled
+            config.mode = mode
             config.updated_at = now
             # Al activar, resetear timestamps para que esperen su intervalo
-            if enabled:
+            if active:
                 config.last_scan_at = config.last_scan_at or now
                 config.last_analyze_at = config.last_analyze_at or now
                 config.last_macro_at = config.last_macro_at or now
         await session.commit()
         await session.refresh(config)
         return config
+
+
+# Alias de compatibilidad
+async def toggle_auto_mode(portfolio_id: int, enabled: bool) -> AutoModeConfig:
+    """Compatibilidad: convierte bool a AutoModeType."""
+    mode = AutoModeType.ON if enabled else AutoModeType.OFF
+    return await set_auto_mode(portfolio_id, mode)
 
 
 async def update_auto_mode_config(
@@ -122,9 +131,11 @@ async def update_auto_mode_timestamps(
 
 
 async def get_all_active_auto_modes() -> Sequence[AutoModeConfig]:
-    """Obtiene todas las configuraciones de modo auto activas."""
+    """Obtiene todas las configuraciones de modo auto activas (ON o SAFE)."""
     async with async_session_factory() as session:
-        stmt = select(AutoModeConfig).where(AutoModeConfig.enabled == True)
+        stmt = select(AutoModeConfig).where(
+            AutoModeConfig.mode.in_([AutoModeType.ON, AutoModeType.SAFE])
+        )
         result = await session.execute(stmt)
         return result.scalars().all()
 

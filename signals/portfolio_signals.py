@@ -127,12 +127,12 @@ async def generate_signals_for_portfolio(
                     tech_diag = technical_analyst.diagnose(
                         ti, fd.current_price, fd.high_52w, fd.low_52w, fd.avg_50d, fd.avg_200d,
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error en análisis técnico de {pos.ticker}: {e}")
             try:
                 price_diag_obj = price_analyst.diagnose(fd)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error en diagnóstico de precio de {pos.ticker}: {e}")
 
             signal_type = SignalType.HOLD
             if vs.overall_score <= SIGNAL_SELL_THRESHOLD:

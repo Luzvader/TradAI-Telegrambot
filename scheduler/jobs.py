@@ -140,6 +140,24 @@ def init_scheduler(telegram_bot: Bot | None = None) -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # ── Cada 30 min: sync posiciones/cash desde Trading212 ──
+    scheduler.add_job(
+        job_sync_broker,
+        IntervalTrigger(minutes=30),
+        id="sync_broker",
+        name="Sync Trading212",
+        replace_existing=True,
+    )
+
+    # ── Cada día a las 10:00: registrar dividendos cobrados desde T212 ──
+    scheduler.add_job(
+        job_check_dividends_t212,
+        CronTrigger(hour=10, minute=0),
+        id="check_dividends_t212",
+        name="Dividendos T212",
+        replace_existing=True,
+    )
+
     # ── Backtest continuo en cartera demo (sin supervisión) ──
     if BACKTEST_CONTINUOUS_ENABLED:
         scheduler.add_job(
@@ -162,6 +180,7 @@ async def job_monitor_prices() -> None:
     """
     Actualiza precios de todas las posiciones abiertas.
     Solo ejecuta si al menos un mercado relevante está abierto.
+    Para cartera REAL, usa precios T212 (1 llamada) + yfinance como fallback.
     """
     # Comprobar si algún mercado está abierto
     any_open = False
@@ -175,6 +194,13 @@ async def job_monitor_prices() -> None:
         return
 
     logger.info("📊 Monitorizando precios...")
+
+    # Refrescar precios T212 antes de actualizar (1 sola llamada API)
+    try:
+        from data.market_data import refresh_broker_prices
+        await refresh_broker_prices()
+    except Exception as e:
+        logger.debug(f"Error refrescando precios T212: {e}")
 
     # Actualizar cartera real
     real = await repo.get_portfolio_by_type(PortfolioType.REAL)
@@ -462,12 +488,20 @@ async def job_weekly_benchmark() -> None:
 
 
 async def job_portfolio_snapshot() -> None:
-    """Guarda un snapshot diario del portfolio para tracking histórico."""
+    """Guarda un snapshot diario del portfolio para tracking histórico.
+    Incluye datos de cuenta T212 cuando está disponible."""
     from portfolio.portfolio_manager import get_portfolio_summary
 
     real = await repo.get_portfolio_by_type(PortfolioType.REAL)
     if real is None:
         return
+
+    # Refrescar precios T212 antes del snapshot
+    try:
+        from data.market_data import refresh_broker_prices
+        await refresh_broker_prices()
+    except Exception:
+        pass
 
     summary = await get_portfolio_summary(real.id)
 
@@ -476,20 +510,130 @@ async def job_portfolio_snapshot() -> None:
     try:
         spy_price = await get_current_price("SPY", "NYSE")
         benchmark = spy_price
+    except Exception as e:
+        logger.debug(f"Error obteniendo benchmark SPY: {e}")
+
+    # Usar cash real de T212 si está disponible
+    cash = summary.get("cash", 0)
+    try:
+        from broker.bridge import get_broker_account_cash
+        broker_acc = await get_broker_account_cash()
+        if broker_acc and broker_acc.get("cash") is not None:
+            cash = broker_acc["cash"]
     except Exception:
         pass
 
     await repo.save_portfolio_snapshot(
         portfolio_id=real.id,
-        total_value=summary.get("total_with_cash", summary.get("total_value", 0) + summary.get("cash", 0)),
+        total_value=summary.get("total_with_cash", summary.get("total_value", 0) + cash),
         invested_value=summary.get("total_invested", 0),
-        cash=summary.get("cash", 0),
+        cash=cash,
         num_positions=summary.get("num_positions", 0),
         pnl=summary.get("total_pnl", 0),
         pnl_pct=summary.get("total_pnl_pct", 0),
         benchmark_value=benchmark,
     )
     logger.info("📸 Snapshot del portfolio guardado")
+
+
+async def job_sync_broker() -> None:
+    """
+    Sincronización periódica con Trading212:
+    1. Refresca precios de posiciones del broker
+    2. Sincroniza cash real del broker con BD local
+    3. Detecta discrepancias entre broker y BD que puedan indicar
+       operaciones manuales fuera de TradAI
+    """
+    from broker.bridge import (
+        sync_cash_from_broker,
+        sync_broker_positions,
+    )
+    from data.market_data import refresh_broker_prices
+
+    real = await repo.get_portfolio_by_type(PortfolioType.REAL)
+    if real is None:
+        return
+
+    try:
+        # 1. Refrescar precios
+        await refresh_broker_prices()
+
+        # 2. Sync cash
+        cash_result = await sync_cash_from_broker(real.id)
+        if cash_result.get("success") and abs(cash_result.get("diff", 0)) > 5.0:
+            logger.info(
+                f"🔄 Broker sync — Cash: {cash_result['old_cash']:.2f} → "
+                f"{cash_result['new_cash']:.2f} ({cash_result['diff']:+.2f})"
+            )
+
+        # 3. Detectar discrepancias
+        sync_result = await sync_broker_positions(real.id)
+        if sync_result.get("success"):
+            only_broker = sync_result.get("only_broker", [])
+            if only_broker:
+                tickers = ", ".join(p["ticker"] for p in only_broker[:5])
+                logger.warning(
+                    f"🔄 Broker sync — Posiciones solo en broker: {tickers}. "
+                    "Usa /broker import para incorporarlas."
+                )
+                # Notificar por Telegram si hay discrepancias significativas
+                if len(only_broker) >= 2:
+                    text = (
+                        f"🔄 *SYNC BROKER*\n\n"
+                        f"Detectadas {len(only_broker)} posiciones solo en Trading212 "
+                        f"(no en TradAI):\n"
+                    )
+                    for p in only_broker[:5]:
+                        text += f"  • {p['ticker']}: {p['shares']:.2f} acc\n"
+                    text += "\n_Usa_ /broker import _para incorporarlas_"
+                    await _notify(text)
+
+    except Exception as e:
+        logger.error(f"Error en job_sync_broker: {e}")
+
+
+async def job_check_dividends_t212() -> None:
+    """
+    Registra automáticamente dividendos cobrados desde Trading212.
+    Se ejecuta diariamente para detectar nuevos dividendos.
+    """
+    from data.dividends import check_and_record_dividends
+
+    real = await repo.get_portfolio_by_type(PortfolioType.REAL)
+    if real is None:
+        return
+
+    try:
+        recorded = await check_and_record_dividends(real.id)
+        if recorded:
+            t212_divs = [d for d in recorded if d.get("source") == "T212"]
+            yf_divs = [d for d in recorded if d.get("source") == "yfinance"]
+
+            text = f"💰 *DIVIDENDOS DETECTADOS ({len(recorded)})*\n\n"
+
+            if t212_divs:
+                text += "🏦 *Trading212 (confirmados):*\n"
+                for d in t212_divs[:10]:
+                    text += (
+                        f"  ${d['ticker']}: ${d['total']:.2f} "
+                        f"({d['shares']:.2f} acc × ${d['amount_per_share']:.4f})\n"
+                    )
+                text += "\n"
+
+            if yf_divs:
+                text += "📊 *yfinance (estimaciones):*\n"
+                for d in yf_divs[:5]:
+                    text += (
+                        f"  ${d['ticker']}: ${d['total']:.2f} "
+                        f"({d['shares']:.2f} acc × ${d['amount_per_share']:.4f})\n"
+                    )
+
+            total = sum(d["total"] for d in recorded)
+            text += f"\n💵 Total: ${total:,.2f}"
+            await _notify(text)
+            logger.info(f"💰 {len(recorded)} dividendos registrados (T212: {len(t212_divs)}, yf: {len(yf_divs)})")
+    except Exception as e:
+        logger.error(f"Error en job_check_dividends_t212: {e}")
 
 
 async def job_check_custom_alerts() -> None:
@@ -525,8 +669,8 @@ async def job_check_custom_alerts() -> None:
                         # TechnicalIndicators no tiene volume directamente,
                         # usamos ATR como proxy de volatilidad
                         pass
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Error comprobando volumen de {alert.ticker}: {e}")
 
             elif alert.alert_type in ("rsi_max", "rsi_above"):
                 try:
@@ -536,8 +680,8 @@ async def job_check_custom_alerts() -> None:
                         if ti.rsi >= alert.threshold:
                             triggered = True
                             detail = f"📈 RSI: {ti.rsi:.1f} ≥ {alert.threshold:.0f} (sobrecompra)"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Error comprobando RSI de {alert.ticker}: {e}")
 
             elif alert.alert_type in ("rsi_min", "rsi_below"):
                 try:
@@ -547,8 +691,8 @@ async def job_check_custom_alerts() -> None:
                         if ti.rsi <= alert.threshold:
                             triggered = True
                             detail = f"📉 RSI: {ti.rsi:.1f} ≤ {alert.threshold:.0f} (sobreventa)"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Error comprobando RSI de {alert.ticker}: {e}")
 
             if triggered:
                 await repo.trigger_alert(alert.id)

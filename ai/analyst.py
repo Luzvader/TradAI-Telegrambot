@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-SYSTEM_PROMPT = """Eres un analista financiero senior. Estilo: gestor de fondos conservador con visión.
+SYSTEM_PROMPT = """Eres un analista financiero senior de un gran fondo de inversión. Estilo: gestor conservador con visión.
+Tu análisis debe ser riguroso, basado en datos financieros oficiales, conservador en supuestos y orientado a la preservación de capital y creación de valor a largo plazo.
 Reglas: contexto geopolítico, fundamentales críticos (P/E, ROE, deuda, FCF), margen seguridad 15-20%, diversificación (máx 5% ticker, 20% sector), horizonte 6-24m, aprendes de errores, conciso con emojis, en español."""
 
 # Base compartida para reducir tokens repetidos
@@ -41,6 +42,32 @@ Valoración razonable CON crecimiento sólido, calidad del negocio (ROE, márgen
     "conservative": f"""Analista financiero senior ultra-conservador.
 Estabilidad: beta ≤1, baja deuda, FCF positivo. Large caps defensivas y predecibles. Evitas cíclicos y alta deuda. Capital preservation > apreciación. Horizonte 3-5 años. {_COMMON_RULES}""",
 }
+
+# ── Bloques de análisis profundo para usar en prompts ────────
+
+INDUSTRY_ANALYSIS_PROMPT = """
+🔍 ANÁLISIS PROFUNDO DE LA INDUSTRIA:
+1) Definición y mapa: industria/subindustria exacta, cadena de valor (proveedores → producción → distribución → cliente), modelo económico típico (drivers de ingresos, estructura de costes, dónde se captura el margen).
+2) Dinámicas competitivas: competencia (fragmentada vs concentrada, precio vs diferenciación, switching costs), efectos de red, economías de escala, barreras de entrada/salida, poder de proveedores/clientes, amenaza de sustitutos.
+3) Márgenes medios industria: rangos típicos de margen bruto, EBITDA/EBIT, margen neto. Compara con la empresa y explica desviaciones (mix, geografía, pricing power, eficiencia, ciclo).
+4) Crecimiento industria: CAGR histórico y esperado, estructural vs cíclico, impulsores (demografía, tecnología, regulación, penetración, precios/volumen).
+5) Retos y riesgos clave: top 3-5 con impacto (alto/medio/bajo) + horizonte (corto/medio/largo).
+6) Sensibilidad: clasificar defensiva/semi-cíclica/cíclica, comportamiento en recesiones y ante tipos de interés.
+7) Cuota de mercado: principales competidores, cuota estimada empresa y top 3-5, tendencia consolidación vs fragmentación.
+"""
+
+COMPANY_ANALYSIS_PROMPT = """
+📊 ANÁLISIS PROFUNDO DE LA EMPRESA:
+1) ¿Qué hace? Core products/services, qué impulsa valor a largo plazo.
+2) ¿Cómo gana dinero? Revenue streams y segmentos operativos, % contribución de cada uno.
+3) ¿Quiénes son sus clientes? Tipos (B2B/B2C, SMBs, enterprises, gobiernos), concentración.
+4) ¿Competidores? Directos y alternativos (sustitutos), posicionamiento competitivo.
+5) ¿Dónde opera? Desglose geográfico de ingresos.
+6) ¿Ingresos recurrentes? Contratos, suscripciones, renewal rates, switching costs.
+7) ¿Pricing power? Tendencias de márgenes bruto/operativo, evidencia en periodos inflacionarios.
+8) ¿Qué pasa en recesión? Ciclicidad, rendimiento histórico en crisis, warnings del management.
+9) ¿Deuda? Estructura capital: deuda total, vencimientos, tipos fijo vs variable, coste, vs cash y FCF.
+"""
 
 
 def get_strategy_prompt(strategy: str | None = None) -> str:
@@ -273,8 +300,8 @@ async def _call_llm(
                 reasoning_used = 0
                 try:
                     reasoning_used = (response.usage.completion_tokens_details.reasoning_tokens or 0) if response.usage and response.usage.completion_tokens_details else 0
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"No se pudo leer reasoning_tokens: {e}")
                 if reasoning_used > 0:
                     logger.warning(
                         f"Respuesta vacía: reasoning consumió {reasoning_used} tokens. "
@@ -298,8 +325,8 @@ async def _call_llm(
                                 context=f"{context}_retry",
                                 estimated_cost_usd=_estimate_cost(OPENAI_MODEL, ru.prompt_tokens or 0, ru.completion_tokens or 0),
                             )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Error guardando uso OpenAI (retry): {e}")
 
             # Guardar en caché
             if use_cache and cache_key and result_text and not result_text.startswith("⚠️"):
@@ -443,15 +470,22 @@ APRENDIZAJE (Win rate: {learning_summary.get('wins', 0)}/{learning_summary.get('
 {objective_text}{portfolio_text}{tradability_text}
 
 Los análisis técnico y de valoración ya están pre-computados arriba.
-Responde SOLO con:
-1. Riesgos principales (2-3)
-2. Catalizadores (2-3)
+Responde con:
+
+{INDUSTRY_ANALYSIS_PROMPT}
+
+{COMPANY_ANALYSIS_PROMPT}
+
+Además:
+1. Riesgos principales (3-5) con impacto y horizonte
+2. Catalizadores (3-5) con timing esperado
 3. Si no es operable en Trading212, indica alternativa operable equivalente
 4. Si hay objetivo previo, evalúa si la tesis sigue vigente
-5. Resumen en 2 frases
+5. Conclusión ejecutiva en 5-8 bullets (atractivo estructural, motor de crecimiento, principal riesgo, pricing power, edge/desventaja vs sector)
+6. Resumen final en 2-3 frases
 """
         ctx = f"analyze_{ticker}" + (f"_{market_norm}" if market_norm else "")
-        return await _call_llm(prompt, system=get_strategy_prompt(strategy), max_tokens=500, context=ctx)
+        return await _call_llm(prompt, system=get_strategy_prompt(strategy), max_tokens=2000, context=ctx)
     else:
         # Prompt completo (fallback sin contexto determinista)
         prompt = f"""Analiza ${ticker}:
@@ -469,18 +503,25 @@ APRENDIZAJE (Win rate: {learning_summary.get('wins', 0)}/{learning_summary.get('
 {lessons_text}
 {objective_text}{portfolio_text}{tradability_text}
 
-Responde con:
+Responde con un análisis completo que incluya:
+
+{INDUSTRY_ANALYSIS_PROMPT}
+
+{COMPANY_ANALYSIS_PROMPT}
+
+Además:
 1. Veredicto: BUY / HOLD / SELL
 2. Convicción: 1-10
-3. Riesgos principales (2-3)
-4. Catalizadores (2-3)
-5. Precio objetivo
+3. Riesgos principales (3-5) con impacto (alto/medio/bajo) y horizonte (corto/medio/largo)
+4. Catalizadores (3-5) con timing esperado
+5. Precio objetivo (con rango de escenarios: bear/base/bull)
 6. Si no es operable en Trading212, indica alternativa operable equivalente
 7. Si hay objetivo previo, evalúa si la tesis sigue vigente
-8. Resumen en 2 frases
+8. Conclusión ejecutiva: atractivo estructural de la industria, motor de crecimiento, principal riesgo, pricing power, edge/desventaja de la empresa vs sector
+9. Resumen en 2-3 frases
 """
         ctx = f"analyze_{ticker}" + (f"_{market_norm}" if market_norm else "")
-        return await _call_llm(prompt, system=get_strategy_prompt(strategy), max_tokens=800, context=ctx)
+        return await _call_llm(prompt, system=get_strategy_prompt(strategy), max_tokens=3000, context=ctx)
 
 
 async def get_macro_analysis(strategy: str | None = None) -> str:

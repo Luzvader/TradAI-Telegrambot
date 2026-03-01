@@ -5,8 +5,8 @@ Rutas del dashboard web.
 import logging
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from config.markets import market_display
 from database import repository as repo
@@ -14,13 +14,83 @@ from database.connection import async_session_factory
 from database.models import (
     PortfolioType,
     Signal,
-    SignalType,
 )
 from sqlalchemy import select, func
+
+from web.auth import auth_manager, SESSION_COOKIE, SESSION_TTL_HOURS
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ── Autenticación ────────────────────────────────────────────
+
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Página de login — formulario para código de acceso."""
+    from web.app import templates
+
+    # Si ya tiene sesión válida, redirigir al dashboard
+    session_token = request.cookies.get(SESSION_COOKIE)
+    if auth_manager.validate_session(session_token):
+        return RedirectResponse(url="/", status_code=302)
+
+    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+
+
+@router.post("/login")
+async def login_submit(request: Request, code: str = Form(...)):
+    """Valida el código de acceso y crea sesión."""
+    from web.app import templates
+
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Comprobar rate-limiting
+    if auth_manager.is_ip_blocked(client_ip):
+        mins = auth_manager.get_remaining_lockout(client_ip)
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": f"Demasiados intentos. Bloqueado {mins} minutos."},
+            status_code=429,
+        )
+
+    code = code.strip()
+
+    if not auth_manager.validate_code(code):
+        auth_manager.record_login_attempt(client_ip)
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "error": "Código inválido o expirado. Genera uno nuevo con /web en Telegram."},
+            status_code=401,
+        )
+
+    # Código válido → crear sesión, limpiar intentos
+    auth_manager.clear_login_attempts(client_ip)
+    session = auth_manager.create_session()
+    response = RedirectResponse(url="/", status_code=302)
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=session.token,
+        max_age=SESSION_TTL_HOURS * 3600,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+    )
+    return response
+
+
+@router.get("/logout")
+async def logout(request: Request):
+    """Cierra la sesión activa."""
+    session_token = request.cookies.get(SESSION_COOKIE)
+    if session_token:
+        auth_manager.revoke_session(session_token)
+
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie(SESSION_COOKIE)
+    return response
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -108,25 +178,25 @@ async def _recent_signals(limit: int = 20) -> list[dict]:
 
 
 async def _signal_stats() -> dict:
-    """Estadísticas de señales de los últimos 30 días."""
-    async with async_session_factory() as session:
-        since = datetime.now(UTC) - timedelta(days=30)
-        buy_count = (await session.execute(
-            select(func.count(Signal.id)).where(
-                Signal.signal_type == SignalType.BUY, Signal.created_at >= since
+    """Estadísticas de señales de los últimos 30 días (query optimizada)."""
+    try:
+        async with async_session_factory() as session:
+            since = datetime.now(UTC) - timedelta(days=30)
+            stmt = (
+                select(Signal.signal_type, func.count(Signal.id))
+                .where(Signal.created_at >= since)
+                .group_by(Signal.signal_type)
             )
-        )).scalar() or 0
-        sell_count = (await session.execute(
-            select(func.count(Signal.id)).where(
-                Signal.signal_type == SignalType.SELL, Signal.created_at >= since
-            )
-        )).scalar() or 0
-        hold_count = (await session.execute(
-            select(func.count(Signal.id)).where(
-                Signal.signal_type == SignalType.HOLD, Signal.created_at >= since
-            )
-        )).scalar() or 0
-        return {"buy": buy_count, "sell": sell_count, "hold": hold_count}
+            rows = (await session.execute(stmt)).all()
+            stats = {"buy": 0, "sell": 0, "hold": 0}
+            for signal_type, count in rows:
+                key = signal_type.value.lower() if signal_type else "hold"
+                if key in stats:
+                    stats[key] = count
+            return stats
+    except Exception as e:
+        logger.warning(f"Error obteniendo estadísticas de señales: {e}")
+        return {"buy": 0, "sell": 0, "hold": 0}
 
 
 # ── Páginas ──────────────────────────────────────────────────
@@ -147,6 +217,23 @@ async def dashboard(request: Request):
     sig_stats = await _signal_stats()
     openai_usage = await repo.get_openai_usage_summary(days=30)
 
+    # Estado del broker T212
+    broker_status = {"connected": False}
+    try:
+        from broker.bridge import get_broker_account_cash
+        broker_acc = await get_broker_account_cash()
+        if broker_acc:
+            broker_status = {
+                "connected": True,
+                "cash": broker_acc.get("cash", 0),
+                "invested": broker_acc.get("invested", 0),
+                "portfolio_value": broker_acc.get("portfolio_value", 0),
+                "pnl": broker_acc.get("pnl", 0),
+                "currency": broker_acc.get("currency", "EUR"),
+            }
+    except Exception:
+        pass
+
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -155,6 +242,7 @@ async def dashboard(request: Request):
             "signals": signals,
             "signal_stats": sig_stats,
             "openai_usage": openai_usage,
+            "broker": broker_status,
         },
     )
 
@@ -215,3 +303,56 @@ async def api_openai_usage(days: int = 30):
 async def api_health():
     """Health check."""
     return {"status": "ok", "timestamp": datetime.now(UTC).isoformat()}
+
+
+@router.get("/api/broker")
+async def api_broker():
+    """API JSON: estado completo del broker Trading212."""
+    try:
+        from broker.bridge import get_broker_status, get_broker_account_cash
+        status = await get_broker_status()
+        return status
+    except Exception as e:
+        return {"connected": False, "error": str(e)}
+
+
+@router.get("/api/broker/dividends")
+async def api_broker_dividends(limit: int = 30):
+    """API JSON: historial de dividendos del broker."""
+    try:
+        from broker.bridge import get_broker_dividend_history
+        divs = await get_broker_dividend_history(limit=limit)
+        total = sum(d.get("amount", 0) for d in divs)
+        return {"dividends": divs, "total": round(total, 2), "count": len(divs)}
+    except Exception as e:
+        return {"error": str(e), "dividends": [], "total": 0}
+
+
+@router.get("/api/broker/instruments")
+async def api_broker_instruments(query: str = "", asset_type: str = ""):
+    """API JSON: buscar instrumentos disponibles en T212."""
+    try:
+        from broker.trading212 import get_trading212_client
+        client = get_trading212_client()
+        if client is None:
+            return {"error": "Broker no configurado", "instruments": []}
+
+        if query:
+            result = await client.search_instrument(query)
+            instruments = result.data if result.success else []
+        else:
+            instruments = await client.get_all_instruments()
+
+        # Filtrar por tipo si se especifica
+        if asset_type:
+            instruments = [
+                i for i in instruments
+                if i.get("type", "").upper() == asset_type.upper()
+            ]
+
+        return {
+            "instruments": instruments[:50],
+            "total": len(instruments),
+        }
+    except Exception as e:
+        return {"error": str(e), "instruments": []}

@@ -73,13 +73,13 @@ async def analyze_ticker(
                 ti, fd.current_price, fd.high_52w, fd.low_52w, fd.avg_50d, fd.avg_200d,
             )
             tech_summary = td.summary
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Error en análisis técnico de {ticker}: {e}")
     try:
         pd_obj = price_analyst.diagnose(fd)
         price_summary = pd_obj.summary
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Error en diagnóstico de precio de {ticker}: {e}")
 
     broker_tradability: dict[str, Any] = {}
     if TRADING212_ANALYSIS_ORIENTED:

@@ -15,6 +15,7 @@ NOTE: Value orders (comprar por importe) no están soportadas por la API
 """
 
 import logging
+from datetime import datetime, UTC
 from typing import Any
 
 from broker.trading212 import Trading212Client, get_trading212_client
@@ -40,6 +41,7 @@ def _check_broker_ready(require_auto_execute: bool = True) -> tuple[Trading212Cl
 async def get_trading212_tradability(ticker: str) -> dict[str, Any]:
     """
     Comprueba si un ticker es operable en Trading212.
+    Usa catálogo cacheado para máxima eficiencia.
     Devuelve un dict compacto para enriquecer análisis y scans.
     """
     tk = ticker.strip().upper()
@@ -57,15 +59,16 @@ async def get_trading212_tradability(ticker: str) -> dict[str, Any]:
         }
 
     try:
-        result = await client.get_instrument_by_ticker(tk)
-        if result.success and result.data:
-            inst = result.data
+        inst = await client.get_instrument_info(tk)
+        if inst:
             info = {
                 "tradable": True,
                 "ticker": tk,
-                "instrument_ticker": inst.get("ticker_t212", inst.get("ticker", tk)),
+                "instrument_ticker": inst.get("ticker_t212", tk),
                 "name": inst.get("name", ""),
+                "type": inst.get("type", ""),
                 "currency": inst.get("currency", ""),
+                "isin": inst.get("isin", ""),
             }
             _TRADABILITY_CACHE[tk] = info
             return info
@@ -73,7 +76,7 @@ async def get_trading212_tradability(ticker: str) -> dict[str, Any]:
         info = {
             "tradable": False,
             "ticker": tk,
-            "reason": result.error or "No encontrado en Trading212",
+            "reason": "No encontrado en Trading212",
         }
         _TRADABILITY_CACHE[tk] = info
         return info
@@ -349,6 +352,7 @@ async def import_broker_positions(portfolio_id: int) -> dict[str, Any]:
     """
     Importa TODAS las posiciones del broker a la BD local.
     Crea posiciones nuevas y actualiza existentes.
+    Infere el mercado correcto a partir del ticker T212.
     """
     client = get_trading212_client()
     if client is None:
@@ -362,6 +366,9 @@ async def import_broker_positions(portfolio_id: int) -> dict[str, Any]:
     if not broker_result.success:
         return {"success": False, "error": broker_result.error}
 
+    # Pre-cargar catálogo para inferir mercados
+    await client._ensure_catalog()
+
     imported = 0
     updated = 0
     errors = []
@@ -369,12 +376,18 @@ async def import_broker_positions(portfolio_id: int) -> dict[str, Any]:
     for bp in broker_result.data:
         ticker = bp.ticker.upper()
         try:
+            # Inferir mercado desde el catálogo T212
+            market = "NASDAQ"  # fallback
+            inst = await client.get_instrument_info(ticker)
+            if inst:
+                market = client.infer_market_from_t212_ticker(inst["ticker_t212"])
+
             # Obtener sector
-            sector = await asyncio.to_thread(get_sector, ticker, "NASDAQ")
+            sector = await asyncio.to_thread(get_sector, ticker, market)
 
             # Check si ya existe
             existing = await repo.get_position_by_ticker(
-                portfolio_id, ticker
+                portfolio_id, ticker, market=market
             )
 
             if existing is None:
@@ -382,14 +395,14 @@ async def import_broker_positions(portfolio_id: int) -> dict[str, Any]:
                 await repo.upsert_position(
                     portfolio_id=portfolio_id,
                     ticker=ticker,
-                    market="NASDAQ",
+                    market=market,
                     sector=sector,
                     shares=bp.shares,
                     avg_price=bp.avg_price,
                 )
                 imported += 1
             else:
-                # Actualizar precio
+                # Actualizar precio y shares si hay discrepancia
                 await repo.update_position_price(existing.id, bp.current_price)
                 updated += 1
 
@@ -404,3 +417,156 @@ async def import_broker_positions(portfolio_id: int) -> dict[str, Any]:
         "errors": errors,
         "total": len(broker_result.data),
     }
+
+
+# ── Funciones de datos del broker ────────────────────────────
+
+
+async def get_broker_prices() -> dict[str, float]:
+    """
+    Obtiene precios actuales de todas las posiciones del broker.
+    Devuelve {TICKER: current_price}. Útil para sustituir yfinance
+    en posiciones que ya están en el broker.
+    """
+    client = get_trading212_client()
+    if client is None:
+        return {}
+    try:
+        return await client.get_positions_prices()
+    except Exception as e:
+        logger.debug(f"Error obteniendo precios del broker: {e}")
+        return {}
+
+
+async def get_broker_account_cash() -> dict[str, Any] | None:
+    """
+    Obtiene información de la cuenta del broker.
+    Devuelve {cash, invested, portfolio_value, pnl, currency} o None.
+    """
+    client = get_trading212_client()
+    if client is None:
+        return None
+    try:
+        result = await client.get_account()
+        if result.success and result.data:
+            acc = result.data
+            return {
+                "cash": acc.cash,
+                "invested": acc.invested,
+                "portfolio_value": acc.portfolio_value,
+                "pnl": acc.pnl,
+                "pnl_pct": acc.pnl_pct,
+                "currency": acc.currency,
+            }
+    except Exception as e:
+        logger.debug(f"Error obteniendo cuenta del broker: {e}")
+    return None
+
+
+async def sync_cash_from_broker(portfolio_id: int) -> dict[str, Any]:
+    """
+    Sincroniza el cash del portfolio local con el cash real del broker.
+    Devuelve {success, old_cash, new_cash, diff}.
+    """
+    client = get_trading212_client()
+    if client is None:
+        return {"success": False, "error": "Broker no configurado"}
+
+    from database import repository as repo
+
+    try:
+        result = await client.get_account()
+        if not result.success:
+            return {"success": False, "error": result.error}
+
+        broker_cash = result.data.cash
+        portfolio = await repo.get_portfolio(portfolio_id)
+        if portfolio is None:
+            return {"success": False, "error": "Portfolio no encontrado"}
+
+        old_cash = portfolio.cash or 0
+        diff = broker_cash - old_cash
+
+        if abs(diff) > 0.01:
+            await repo.set_cash(portfolio_id, broker_cash)
+            logger.info(
+                f"💰 Cash sincronizado: {old_cash:.2f} → {broker_cash:.2f} "
+                f"(diff: {diff:+.2f})"
+            )
+
+        return {
+            "success": True,
+            "old_cash": round(old_cash, 2),
+            "new_cash": round(broker_cash, 2),
+            "diff": round(diff, 2),
+            "currency": result.data.currency,
+        }
+    except Exception as e:
+        logger.error(f"Error sincronizando cash: {e}")
+        return {"success": False, "error": str(e)}
+
+
+async def get_broker_dividend_history(limit: int = 50) -> list[dict[str, Any]]:
+    """
+    Obtiene el historial de dividendos cobrados en el broker.
+    Devuelve lista de dicts con datos del dividendo.
+    """
+    client = get_trading212_client()
+    if client is None:
+        return []
+    try:
+        result = await client.get_dividend_history_all()
+        if not result.success:
+            return []
+
+        items = result.data or []
+        parsed = []
+        for item in items[:limit]:
+            ticker_raw = item.get("ticker", "")
+            parsed.append({
+                "ticker": client._clean_ticker(ticker_raw),
+                "ticker_t212": ticker_raw,
+                "amount": item.get("amount", 0),
+                "quantity": item.get("quantity", 0),
+                "amount_per_share": (
+                    item.get("amount", 0) / item.get("quantity", 1)
+                    if item.get("quantity", 0) > 0 else 0
+                ),
+                "paid_on": item.get("paidOn", ""),
+                "reference": item.get("reference", ""),
+            })
+        return parsed
+    except Exception as e:
+        logger.debug(f"Error obteniendo historial dividendos: {e}")
+        return []
+
+
+async def get_broker_transaction_history(limit: int = 50) -> list[dict[str, Any]]:
+    """
+    Obtiene el historial de transacciones del broker.
+    """
+    client = get_trading212_client()
+    if client is None:
+        return []
+    try:
+        result = await client.get_transaction_history(limit=limit)
+        if not result.success:
+            return []
+
+        data = result.data
+        items = data.get("items", data) if isinstance(data, dict) else data
+        if not isinstance(items, list):
+            return []
+
+        parsed = []
+        for item in items:
+            parsed.append({
+                "type": item.get("type", ""),
+                "amount": item.get("amount", 0),
+                "date": item.get("dateTime", item.get("dateExecuted", "")),
+                "reference": item.get("reference", ""),
+            })
+        return parsed
+    except Exception as e:
+        logger.debug(f"Error obteniendo transacciones: {e}")
+        return []

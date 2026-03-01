@@ -1,9 +1,8 @@
 """
 Servicio de detección y registro de dividendos.
 
-Consulta yfinance para obtener el calendario de dividendos de las
-posiciones abiertas y registra pagos cuando se detecta una fecha ex-dividend
-en el pasado reciente.
+Fuente primaria: Trading212 API (dividendos realmente cobrados, datos exactos).
+Fuente secundaria: yfinance (estimaciones, para posiciones no en broker).
 """
 
 import asyncio
@@ -21,24 +20,97 @@ logger = logging.getLogger(__name__)
 
 async def check_and_record_dividends(portfolio_id: int) -> list[dict[str, Any]]:
     """
-    Revisa todas las posiciones abiertas de un portfolio:
-    1. Consulta el historial de dividendos recientes de yfinance.
-    2. Si hay un dividendo cuya ex-date fue en los últimos 30 días,
-       lo registra si no está ya guardado.
+    Revisa dividendos usando dos fuentes:
+    1. Trading212 API: dividendos realmente cobrados (datos exactos)
+    2. yfinance: fallback para posiciones no en el broker
 
     Returns:
         Lista de dividendos recién registrados.
     """
-    positions = list(await repo.get_open_positions(portfolio_id))
     recorded: list[dict[str, Any]] = []
 
+    # ── Fase 1: Dividendos reales desde Trading212 ──
+    try:
+        from broker.bridge import get_broker_dividend_history
+        t212_divs = await get_broker_dividend_history(limit=100)
+        if t212_divs:
+            existing = await repo.get_dividends_for_portfolio(
+                portfolio_id, since_days=365,
+            )
+            existing_keys = set()
+            for d in existing:
+                key = (
+                    d.ticker.upper() if d.ticker else "",
+                    d.ex_date.date() if d.ex_date else None,
+                    round(d.total_amount, 2) if d.total_amount else 0,
+                )
+                existing_keys.add(key)
+
+            for div in t212_divs:
+                ticker = div.get("ticker", "").upper()
+                amount = div.get("amount", 0)
+                quantity = div.get("quantity", 0)
+                paid_on_str = div.get("paid_on", "")
+
+                if not ticker or amount <= 0:
+                    continue
+
+                # Parsear fecha
+                try:
+                    if paid_on_str:
+                        pay_date = datetime.fromisoformat(
+                            paid_on_str.replace("Z", "+00:00")
+                        )
+                    else:
+                        pay_date = datetime.now(UTC)
+                except Exception:
+                    pay_date = datetime.now(UTC)
+
+                # Check duplicado
+                key = (ticker, pay_date.date(), round(amount, 2))
+                if key in existing_keys:
+                    continue
+
+                amount_per_share = amount / quantity if quantity > 0 else amount
+
+                dp = await repo.save_dividend_payment(
+                    portfolio_id=portfolio_id,
+                    ticker=ticker,
+                    market="NASDAQ",  # se infiere después si es necesario
+                    amount_per_share=amount_per_share,
+                    shares_held=quantity,
+                    currency="USD",
+                    ex_date=pay_date,
+                    pay_date=pay_date,
+                )
+                existing_keys.add(key)
+                recorded.append({
+                    "ticker": ticker,
+                    "amount_per_share": amount_per_share,
+                    "shares": quantity,
+                    "total": dp.total_amount,
+                    "ex_date": str(pay_date.date()),
+                    "source": "T212",
+                })
+                logger.info(
+                    f"💰 Dividendo T212: {ticker} "
+                    f"${amount:.2f} ({quantity:.2f} acc)"
+                )
+    except Exception as e:
+        logger.warning(f"Error obteniendo dividendos de T212: {e}")
+
+    # ── Fase 2: yfinance para posiciones no cubiertas por T212 ──
+    positions = list(await repo.get_open_positions(portfolio_id))
+    t212_tickers = {d["ticker"].upper() for d in recorded}
+
     for pos in positions:
+        if pos.ticker.upper() in t212_tickers:
+            continue  # ya registrado desde T212
         try:
             divs = await _get_recent_dividends(pos.ticker, pos.market)
             if not divs:
                 continue
 
-            # Comprobar cuáles ya están registrados
             existing = await repo.get_dividends_for_portfolio(
                 portfolio_id, since_days=90,
             )
@@ -69,9 +141,10 @@ async def check_and_record_dividends(portfolio_id: int) -> list[dict[str, Any]]:
                     "shares": pos.shares,
                     "total": dp.total_amount,
                     "ex_date": str(ex_date.date()) if ex_date else "N/A",
+                    "source": "yfinance",
                 })
                 logger.info(
-                    f"Dividendo registrado: {pos.ticker} "
+                    f"Dividendo registrado (yfinance): {pos.ticker} "
                     f"${div_info['amount']:.4f}/acc × {pos.shares} = ${dp.total_amount:.2f}"
                 )
         except Exception as e:

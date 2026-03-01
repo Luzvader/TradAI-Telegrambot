@@ -122,7 +122,13 @@ async def cmd_cartera(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     # ── Auto mode ──
     config = await repo.get_auto_mode_config(real.id)
     if config:
-        a_status = "🟢 Activo" if config.enabled else "🔴 Inactivo"
+        from database.models import AutoModeType
+        mode_labels = {
+            AutoModeType.OFF: "🔴 OFF",
+            AutoModeType.ON: "🟢 ON",
+            AutoModeType.SAFE: "🛡️ SAFE",
+        }
+        a_status = mode_labels.get(config.mode, "🔴 OFF")
         text += f"\n🤖 Modo auto: {a_status}\n"
 
     await _send_long(update, text)

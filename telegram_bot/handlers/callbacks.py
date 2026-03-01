@@ -165,3 +165,99 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
         else:
             await query.edit_message_text("❌ Error al cambiar la estrategia.")
+
+    # ── Auto mode SAFE: buy confirm ──
+    elif data.startswith("auto_buy:"):
+        parts = data.split(":")
+        if len(parts) != 5:
+            await query.edit_message_text("❌ Datos inválidos.")
+            return
+        ticker, market = parts[1], parts[2]
+        shares, price = float(parts[3]), float(parts[4])
+
+        portfolio = await repo.get_portfolio_by_type(PortfolioType.REAL)
+        if portfolio is None:
+            await query.edit_message_text("❌ Cartera no inicializada.")
+            return
+
+        mkt_name = market_display(market)
+        await query.edit_message_text(
+            f"⏳ 🛡️ SAFE — Comprando {shares:.4f} acc de {ticker} ({mkt_name}) a {price}$..."
+        )
+
+        result = await execute_buy(
+            portfolio_id=portfolio.id,
+            ticker=ticker,
+            market=market,
+            price=price,
+            shares=shares,
+        )
+
+        if result["success"]:
+            text = "🛡️ *SAFE — COMPRA ejecutada* ✅\n\n"
+            text += f"📌 Ticker: {_escape_md(ticker)} ({_escape_md(mkt_name)})\n"
+            text += f"💵 Precio: {price}$\n"
+            text += f"📊 Acciones: {result.get('shares', shares):.4f}\n"
+            text += f"💰 Total: {result.get('amount', 0):.2f}$\n"
+            if result.get("broker_executed"):
+                text += "🏦 Broker: Trading212 ✅\n"
+            if "stop_loss" in result:
+                text += f"\n🛡️ Stop-Loss: {result['stop_loss']}$\n"
+                text += f"🎯 Take-Profit: {result['take_profit']}$\n"
+        else:
+            text = f"❌ *Error:* {result['error']}"
+
+        try:
+            await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+        except Exception:
+            await query.edit_message_text(text)
+
+    # ── Auto mode SAFE: sell confirm ──
+    elif data.startswith("auto_sell:"):
+        parts = data.split(":")
+        if len(parts) != 5:
+            await query.edit_message_text("❌ Datos inválidos.")
+            return
+        ticker, market = parts[1], parts[2]
+        shares, price = float(parts[3]), float(parts[4])
+
+        portfolio = await repo.get_portfolio_by_type(PortfolioType.REAL)
+        if portfolio is None:
+            await query.edit_message_text("❌ Cartera no inicializada.")
+            return
+
+        mkt_name = market_display(market)
+        await query.edit_message_text(
+            f"⏳ 🛡️ SAFE — Vendiendo {shares:.4f} acc de {ticker} ({mkt_name}) a {price}$..."
+        )
+
+        result = await execute_sell(
+            portfolio_id=portfolio.id,
+            ticker=ticker,
+            market=market,
+            price=price,
+            shares_to_sell=shares,
+        )
+
+        if result["success"]:
+            text = "🛡️ *SAFE — VENTA ejecutada* ✅\n\n"
+            text += f"📌 Ticker: {_escape_md(ticker)} ({_escape_md(mkt_name)})\n"
+            text += f"💵 Precio: {price}$\n"
+            text += f"📊 Acciones vendidas: {result.get('shares_sold', shares):.4f}\n"
+            text += f"💰 Total: {result.get('amount', 0):.2f}$\n"
+            if result.get("broker_executed"):
+                text += "🏦 Broker: Trading212 ✅\n"
+            if "pnl" in result:
+                pnl_emoji = "🟢" if result["pnl"] >= 0 else "🔴"
+                text += f"\n{pnl_emoji} PnL: {result['pnl']:+.2f}$ ({result['pnl_pct']:+.2f}%)\n"
+        else:
+            text = f"❌ *Error:* {result['error']}"
+
+        try:
+            await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+        except Exception:
+            await query.edit_message_text(text)
+
+    # ── Auto mode SAFE: reject ──
+    elif data == "auto_reject":
+        await query.edit_message_text("🛡️ Operación rechazada por el usuario.")

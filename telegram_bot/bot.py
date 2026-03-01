@@ -60,8 +60,8 @@ async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> 
                 await msg.reply_text(
                     f"⚠️ Error interno: {type(context.error).__name__}"
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"No se pudo enviar mensaje de error al usuario: {e}")
 
 
 async def set_bot_commands(app: Application) -> None:

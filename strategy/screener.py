@@ -44,6 +44,19 @@ async def screen_universe(
     all_scores: list[StrategyScore] = []
     sem = asyncio.Semaphore(max(1, int(YFINANCE_MAX_CONCURRENCY)))
 
+    async def _analyze_one(t: str, m: str) -> StrategyScore | None:
+        try:
+            async with sem:
+                fd = await asyncio.to_thread(fetch_fundamentals, t, m)
+                vs = await asyncio.to_thread(analyzer, fd)
+                vs.market = m  # Propagar mercado de origen
+            return vs if vs.overall_score >= min_score else None
+        except Exception as e:
+            logger.warning(f"Error analizando {t}: {e}")
+            return None
+
+    # Recopilar todos los tickers de todos los mercados y luego analizar en paralelo
+    all_tasks = []
     for market in markets:
         # Descubrimiento dinámico de tickers
         tickers = await get_tickers_for_market(market)
@@ -51,21 +64,10 @@ async def screen_universe(
         tickers = list(set(tickers + _custom_tickers.get(market, [])))
         logger.info(f"🔍 Screening {market}: {len(tickers)} tickers...")
 
-        # Ejecutar análisis en paralelo con threads para no bloquear
-        async def _analyze_one(t: str, m: str) -> StrategyScore | None:
-            try:
-                async with sem:
-                    fd = await asyncio.to_thread(fetch_fundamentals, t, m)
-                    vs = await asyncio.to_thread(analyzer, fd)
-                    vs.market = m  # Propagar mercado de origen
-                return vs if vs.overall_score >= min_score else None
-            except Exception as e:
-                logger.warning(f"Error analizando {t}: {e}")
-                return None
+        all_tasks.extend(_analyze_one(t, market) for t in tickers)
 
-        tasks = [_analyze_one(t, market) for t in tickers]
-        results = await asyncio.gather(*tasks)
-        all_scores.extend(vs for vs in results if vs is not None)
+    results = await asyncio.gather(*all_tasks)
+    all_scores.extend(vs for vs in results if vs is not None)
 
     # Ordenar por score descendente
     all_scores.sort(key=lambda x: x.overall_score, reverse=True)
@@ -93,14 +95,16 @@ async def quick_scan(
     tickers: list[str],
     strategy: StrategyType | str | None = None,
 ) -> list[dict[str, Any]]:
-    """Escaneo rápido: price + P/E + señal para una lista."""
-    results = []
+    """Escaneo rápido: price + P/E + señal para una lista (paralelizado)."""
     analyzer = get_strategy_analyzer(strategy)
-    for ticker in tickers:
+    sem = asyncio.Semaphore(max(1, int(YFINANCE_MAX_CONCURRENCY)))
+
+    async def _scan_one(ticker: str) -> dict[str, Any] | None:
         try:
-            fd = await asyncio.to_thread(fetch_fundamentals, ticker)
-            vs = await asyncio.to_thread(analyzer, fd)
-            results.append({
+            async with sem:
+                fd = await asyncio.to_thread(fetch_fundamentals, ticker)
+                vs = await asyncio.to_thread(analyzer, fd)
+            return {
                 "ticker": ticker.upper(),
                 "price": fd.current_price,
                 "pe": fd.pe_ratio,
@@ -108,7 +112,10 @@ async def quick_scan(
                 "score": vs.overall_score,
                 "signal": vs.signal,
                 "strategy": vs.strategy,
-            })
+            }
         except Exception as e:
             logger.warning(f"Error en quick_scan de {ticker}: {e}")
-    return results
+            return None
+
+    results = await asyncio.gather(*[_scan_one(t) for t in tickers])
+    return [r for r in results if r is not None]

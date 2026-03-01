@@ -6,6 +6,9 @@ Gestor de portfolio – tracker de operaciones reales.
 El usuario indica qué operaciones ha realizado (ticker, acciones, precio)
 y el bot las registra, monitoriza y analiza.
 Incluye tracking de cash y aprendizaje automático al cerrar posiciones.
+
+Para carteras REAL conectadas a Trading212, usa precios del broker como
+fuente primaria (más precisa y sin delay de 15 min vs yfinance).
 """
 
 import asyncio
@@ -14,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from data.fundamentals import get_sector
-from data.market_data import get_prices_batch
+from data.market_data import get_prices_batch, refresh_broker_prices
 from database import repository as repo
 from database.models import (
     OperationSide,
@@ -297,7 +300,14 @@ async def get_portfolio_summary(portfolio_id: int) -> dict[str, Any]:
 
     positions = list(await repo.get_open_positions(portfolio_id))
 
-    # Actualizar precios
+    # Para cartera REAL, refrescar precios T212 antes de usar get_prices_batch
+    if portfolio.portfolio_type == PortfolioType.REAL:
+        try:
+            await refresh_broker_prices()
+        except Exception as e:
+            logger.debug(f"Error refrescando precios T212: {e}")
+
+    # Actualizar precios (T212 primero, yfinance como fallback)
     tickers_by_market: dict[str, list[str]] = {}
     for pos in positions:
         tickers_by_market.setdefault(pos.market, []).append(pos.ticker)
@@ -320,8 +330,8 @@ async def get_portfolio_summary(portfolio_id: int) -> dict[str, Any]:
                 if sector and sector not in ("Unknown", "N/A", ""):
                     pos.sector = sector
                     await repo.update_position_sector(pos.id, sector)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error actualizando sector de {pos.ticker}: {e}")
 
     total_value = calculate_portfolio_value(positions)
     total_invested = sum(p.avg_price * p.shares for p in positions)
@@ -390,9 +400,19 @@ async def get_portfolio_summary(portfolio_id: int) -> dict[str, Any]:
 
 
 async def update_all_prices(portfolio_id: int) -> int:
-    """Actualiza los precios de todas las posiciones abiertas."""
+    """Actualiza los precios de todas las posiciones abiertas.
+    Para REAL, usa T212 primero (1 llamada) y yfinance como fallback."""
+    portfolio = await repo.get_portfolio(portfolio_id)
     positions = list(await repo.get_open_positions(portfolio_id))
     updated = 0
+
+    # Refrescar precios T212 si es cartera REAL
+    if portfolio and portfolio.portfolio_type == PortfolioType.REAL:
+        try:
+            await refresh_broker_prices()
+        except Exception:
+            pass
+
     tickers_by_market: dict[str, list[str]] = {}
     for pos in positions:
         tickers_by_market.setdefault(pos.market, []).append(pos.ticker)
@@ -413,6 +433,14 @@ async def check_alerts(portfolio_id: int) -> list[dict[str, Any]]:
     """Comprueba alertas de stop-loss y take-profit."""
     positions = list(await repo.get_open_positions(portfolio_id))
     alerts = []
+
+    # Refrescar T212 para precios más precisos en SL/TP
+    portfolio = await repo.get_portfolio(portfolio_id)
+    if portfolio and portfolio.portfolio_type == PortfolioType.REAL:
+        try:
+            await refresh_broker_prices()
+        except Exception:
+            pass
 
     tickers_by_market: dict[str, list[str]] = {}
     for pos in positions:

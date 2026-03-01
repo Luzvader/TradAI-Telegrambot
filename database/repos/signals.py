@@ -10,6 +10,7 @@ from sqlalchemy import select, func
 
 from database.connection import async_session_factory
 from database.models import (
+    AssetType,
     EarningsEvent,
     Signal,
     SignalType,
@@ -121,20 +122,22 @@ async def add_to_watchlist(
     sector: str | None = None,
     reason: str | None = None,
     ai_notes: str | None = None,
+    asset_type: AssetType = AssetType.STOCK,
 ) -> WatchlistItem | None:
-    """Añade un ticker. Devuelve None si ya hay 5 activos."""
+    """Añade un ticker. Devuelve None si ya hay 100 activos."""
     async with async_session_factory() as session:
         count_stmt = select(func.count()).where(
             WatchlistItem.status == WatchlistStatus.ACTIVE
         )
         count_result = await session.execute(count_stmt)
         count = count_result.scalar() or 0
-        if count >= 5:
+        if count >= 100:
             return None
 
         item = WatchlistItem(
             ticker=ticker.upper(),
             market=market,
+            asset_type=asset_type,
             sector=sector,
             reason=reason,
             ai_notes=ai_notes,

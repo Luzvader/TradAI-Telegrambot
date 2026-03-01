@@ -142,13 +142,11 @@ def diagnose(
         resistances.append(sma50)
 
     if supports:
-        d.support = round(max(s for s in supports if current_price is None or s < current_price * 1.02), 2) if any(
-            current_price is None or s < current_price * 1.02 for s in supports
-        ) else round(min(supports), 2)
+        valid_supports = [s for s in supports if current_price is None or s < current_price * 1.02]
+        d.support = round(max(valid_supports), 2) if valid_supports else round(min(supports), 2)
     if resistances:
-        d.resistance = round(min(r for r in resistances if current_price is None or r > current_price * 0.98), 2) if any(
-            current_price is None or r > current_price * 0.98 for r in resistances
-        ) else round(max(resistances), 2)
+        valid_resistances = [r for r in resistances if current_price is None or r > current_price * 0.98]
+        d.resistance = round(min(valid_resistances), 2) if valid_resistances else round(max(resistances), 2)
 
     # ── Distancia al rango 52 semanas ────────────────────────
     if current_price and high_52w and low_52w and high_52w > low_52w:

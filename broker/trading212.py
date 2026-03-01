@@ -25,6 +25,7 @@ Endpoints soportados:
 import asyncio
 import base64
 import logging
+import time
 from typing import Any
 
 import aiohttp
@@ -54,7 +55,26 @@ MARKET_EXCHANGE_MAP = {
     "LSE": "_UK_EQ",
     "XETRA": "_DE_EQ",
     "EURONEXT": "_FR_EQ",
+    "EURONEXT_PARIS": "_FR_EQ",
+    "EURONEXT_AMSTERDAM": "_NL_EQ",
+    "BORSA_ITALIANA": "_IT_EQ",
+    "BOLSA_LISBOA": "_PT_EQ",
 }
+
+# Mapeo inverso: suffix T212 → mercado TradAI
+_SUFFIX_TO_MARKET: dict[str, str] = {
+    "_US_EQ": "NASDAQ",
+    "_ES_EQ": "IBEX",
+    "_UK_EQ": "LSE",
+    "_DE_EQ": "XETRA",
+    "_FR_EQ": "EURONEXT",
+    "_NL_EQ": "EURONEXT_AMSTERDAM",
+    "_IT_EQ": "BORSA_ITALIANA",
+    "_PT_EQ": "BOLSA_LISBOA",
+}
+
+# TTL del catálogo de instrumentos en segundos (24 horas)
+_INSTRUMENTS_CATALOG_TTL = 86_400
 
 # Rate limit delays por tipo de endpoint (conservadores)
 _RATE_LIMITS = {
@@ -95,7 +115,18 @@ class Trading212Client(BaseBroker):
         self.base_url = BASE_URLS[mode]
         self._auth_header = _build_basic_auth(api_key, api_secret)
         self._session: aiohttp.ClientSession | None = None
+        # Caché de resolución ticker → instrumento (para órdenes)
         self._instruments_cache: dict[str, dict] = {}
+        # Catálogo completo de instrumentos con TTL
+        self._catalog: list[dict] = []
+        self._catalog_by_ticker: dict[str, dict] = {}   # ticker limpio → inst
+        self._catalog_by_t212: dict[str, dict] = {}      # ticker T212 → inst
+        self._catalog_by_isin: dict[str, dict] = {}      # ISIN → inst
+        self._catalog_ts: float = 0.0                     # timestamp de última carga
+        # Caché de posiciones para precios (TTL corto)
+        self._positions_cache: list[BrokerPosition] = []
+        self._positions_ts: float = 0.0
+        self._positions_ttl: float = 60.0  # 60 segundos
         logger.info(f"🔗 Trading212 configurado en modo {mode.upper()}")
 
     @property
@@ -509,46 +540,148 @@ class Trading212Client(BaseBroker):
 
     # ── Instruments ──────────────────────────────────────────
 
-    async def search_instrument(self, query: str) -> BrokerResult:
+    async def _ensure_catalog(self, force: bool = False) -> bool:
         """
-        Busca instrumentos por nombre o ticker.
-        GET /equity/metadata/instruments
-        Nota: la API devuelve TODOS los instrumentos; filtramos localmente.
+        Carga el catálogo completo de instrumentos de T212 si no está cacheado
+        o si el TTL ha expirado.  Devuelve True si el catálogo está disponible.
         """
+        now = time.monotonic()
+        if not force and self._catalog and (now - self._catalog_ts) < _INSTRUMENTS_CATALOG_TTL:
+            return True  # catálogo vigente
+
         result = await self._request(
             "GET", "/equity/metadata/instruments", rate_key="instruments"
         )
         if not result.success:
-            return result
+            logger.error(f"Error cargando catálogo de instrumentos: {result.error}")
+            return bool(self._catalog)  # devuelve True si hay catálogo viejo
 
         instruments = result.data or []
-        query_upper = query.upper()
-        matches = []
+        self._catalog = instruments
+        self._catalog_by_ticker = {}
+        self._catalog_by_t212 = {}
+        self._catalog_by_isin = {}
+
         for inst in instruments:
+            t212_ticker = inst.get("ticker", "")
+            clean = self._clean_ticker(t212_ticker)
+            isin = inst.get("isin", "")
+            entry = {
+                "ticker_t212": t212_ticker,
+                "ticker": clean,
+                "name": inst.get("name", ""),
+                "short_name": inst.get("shortName", ""),
+                "type": inst.get("type", ""),          # STOCK, ETF, etc.
+                "currency": inst.get("currencyCode", ""),
+                "isin": isin,
+                "max_open_qty": inst.get("maxOpenQuantity"),
+                "added_on": inst.get("addedOn", ""),
+                "working_schedule_id": inst.get("workingScheduleId"),
+            }
+            self._catalog_by_ticker[clean.upper()] = entry
+            self._catalog_by_t212[t212_ticker] = entry
+            if isin:
+                self._catalog_by_isin[isin] = entry
+
+        self._catalog_ts = now
+        logger.info(
+            f"📦 Catálogo T212 cargado: {len(instruments)} instrumentos "
+            f"({sum(1 for i in instruments if i.get('type') == 'STOCK')} stocks, "
+            f"{sum(1 for i in instruments if i.get('type') == 'ETF')} ETFs)"
+        )
+        return True
+
+    async def get_all_instruments(self, force_refresh: bool = False) -> list[dict]:
+        """Devuelve el catálogo completo de instrumentos (cacheado)."""
+        await self._ensure_catalog(force=force_refresh)
+        return [self._catalog_by_t212[k] for k in self._catalog_by_t212]
+
+    async def get_instrument_info(self, ticker: str) -> dict | None:
+        """
+        Obtiene info de un instrumento por ticker limpio (ej: 'AAPL').
+        Usa el catálogo cacheado. Devuelve None si no existe.
+        """
+        await self._ensure_catalog()
+        return self._catalog_by_ticker.get(ticker.upper().strip())
+
+    async def get_instrument_by_isin(self, isin: str) -> dict | None:
+        """Obtiene info de un instrumento por ISIN."""
+        await self._ensure_catalog()
+        return self._catalog_by_isin.get(isin.upper().strip())
+
+    async def is_tradable(self, ticker: str) -> bool:
+        """Comprueba rápidamente si un ticker es operable en T212."""
+        await self._ensure_catalog()
+        return ticker.upper().strip() in self._catalog_by_ticker
+
+    async def get_tradable_tickers(
+        self, asset_type: str | None = None
+    ) -> list[str]:
+        """
+        Devuelve lista de tickers operables en T212.
+        asset_type: "STOCK", "ETF", None (todos).
+        """
+        await self._ensure_catalog()
+        result = []
+        for tk, info in self._catalog_by_ticker.items():
+            if asset_type and info.get("type", "").upper() != asset_type.upper():
+                continue
+            result.append(tk)
+        return result
+
+    def infer_market_from_t212_ticker(self, t212_ticker: str) -> str:
+        """
+        Infiere el mercado TradAI a partir del ticker T212.
+        Ej: 'AAPL_US_EQ' → 'NASDAQ', 'SAN_ES_EQ' → 'IBEX'
+        """
+        for suffix, market in _SUFFIX_TO_MARKET.items():
+            if t212_ticker.endswith(suffix):
+                return market
+        return "NASDAQ"  # fallback
+
+    async def search_instrument(self, query: str) -> BrokerResult:
+        """
+        Busca instrumentos por nombre o ticker.
+        Usa catálogo cacheado en lugar de llamar a la API cada vez.
+        """
+        ok = await self._ensure_catalog()
+        if not ok:
+            return BrokerResult(success=False, error="No se pudo cargar catálogo de instrumentos")
+
+        query_upper = query.upper().strip()
+        matches = []
+        for inst in self._catalog_by_t212.values():
             ticker = inst.get("ticker", "")
+            t212 = inst.get("ticker_t212", "")
             name = inst.get("name", "")
-            short = inst.get("shortName", "")
+            short = inst.get("short_name", "")
             if (
                 query_upper in ticker.upper()
+                or query_upper in t212.upper()
                 or query_upper in name.upper()
                 or query_upper in short.upper()
             ):
                 matches.append({
-                    "ticker_t212": ticker,
-                    "ticker": self._clean_ticker(ticker),
+                    "ticker_t212": t212,
+                    "ticker": ticker,
                     "name": name,
                     "short_name": short,
                     "type": inst.get("type", ""),
-                    "currency": inst.get("currencyCode", ""),
+                    "currency": inst.get("currency", ""),
                     "isin": inst.get("isin", ""),
-                    "min_trade_qty": inst.get("minTradeQuantity"),
-                    "max_open_qty": inst.get("maxOpenQuantity"),
+                    "min_trade_qty": inst.get("min_trade_qty"),
+                    "max_open_qty": inst.get("max_open_qty"),
                 })
 
         return BrokerResult(success=True, data=matches[:20])
 
     async def get_instrument_by_ticker(self, ticker: str) -> BrokerResult:
-        """Obtiene info de un instrumento específico."""
+        """Obtiene info de un instrumento específico usando catálogo cacheado."""
+        info = await self.get_instrument_info(ticker)
+        if info:
+            return BrokerResult(success=True, data=info)
+
+        # Fallback: buscar por coincidencia parcial
         result = await self.search_instrument(ticker)
         if not result.success:
             return result
@@ -589,6 +722,49 @@ class Trading212Client(BaseBroker):
             rate_key="default",
         )
 
+    async def get_dividend_history_all(self) -> BrokerResult:
+        """
+        Obtiene el historial COMPLETO de dividendos con paginación cursor-based.
+        Devuelve lista de todos los dividendos recibidos en la cuenta.
+        """
+        all_items: list[dict] = []
+        params: dict[str, Any] = {"limit": 50}
+        max_pages = 20  # seguridad contra bucle infinito
+
+        for _ in range(max_pages):
+            result = await self._request(
+                "GET", "/equity/history/dividends",
+                params=params, rate_key="default",
+            )
+            if not result.success:
+                if all_items:
+                    return BrokerResult(success=True, data=all_items)
+                return result
+
+            data = result.data
+            if isinstance(data, dict):
+                items = data.get("items", [])
+                next_path = data.get("nextPagePath")
+            elif isinstance(data, list):
+                items = data
+                next_path = None
+            else:
+                break
+
+            all_items.extend(items)
+
+            if not next_path or not items:
+                break
+
+            # El nextPagePath viene como URL relativa, extraer cursor
+            if "cursor=" in next_path:
+                cursor = next_path.split("cursor=")[-1].split("&")[0]
+                params = {"limit": 50, "cursor": cursor}
+            else:
+                break
+
+        return BrokerResult(success=True, data=all_items)
+
     async def get_transaction_history(self, limit: int = 20) -> BrokerResult:
         """
         Obtiene historial de transacciones.
@@ -617,24 +793,67 @@ class Trading212Client(BaseBroker):
         """
         if not raw:
             return raw
-        for suffix in ("_US_EQ", "_ES_EQ", "_UK_EQ", "_DE_EQ", "_FR_EQ",
-                        "_NL_EQ", "_IT_EQ", "_PT_EQ", "_EQ"):
+        for suffix in _SUFFIX_TO_MARKET:
             if raw.endswith(suffix):
                 return raw[: -len(suffix)]
+        if raw.endswith("_EQ"):
+            return raw[:-3]
         if "_" in raw:
             return raw.split("_")[0]
         return raw
 
+    # ── Precios desde posiciones (caché corto) ───────────────
+
+    async def get_positions_prices(self) -> dict[str, float]:
+        """
+        Devuelve {ticker_limpio: current_price} de todas las posiciones T212.
+        Útil para obtener precios real-time de instrumentos en cartera sin
+        usar yfinance. Cache de 60 segundos.
+        """
+        now = time.monotonic()
+        if self._positions_cache and (now - self._positions_ts) < self._positions_ttl:
+            return {p.ticker.upper(): p.current_price for p in self._positions_cache}
+
+        result = await self.get_positions()
+        if result.success and result.data:
+            self._positions_cache = result.data
+            self._positions_ts = now
+            return {p.ticker.upper(): p.current_price for p in result.data}
+        return {}
+
+    async def get_positions_details(self) -> list[BrokerPosition]:
+        """
+        Devuelve posiciones T212 con caché corto (60s).
+        Incluye ticker, shares, avg_price, current_price, pnl, currency, etc.
+        """
+        now = time.monotonic()
+        if self._positions_cache and (now - self._positions_ts) < self._positions_ttl:
+            return self._positions_cache
+
+        result = await self.get_positions()
+        if result.success and result.data:
+            self._positions_cache = result.data
+            self._positions_ts = now
+            return result.data
+        return []
+
     async def _resolve_ticker(self, ticker: str) -> str | None:
         """
         Convierte un ticker estándar (ej: "AAPL") al formato Trading212
-        (ej: "AAPL_US_EQ"). Cachea resultados.
+        (ej: "AAPL_US_EQ"). Usa catálogo cacheado.
         """
         ticker = ticker.upper().strip()
 
         if ticker in self._instruments_cache:
             return self._instruments_cache[ticker]["ticker_t212"]
 
+        # Intentar desde catálogo cacheado primero
+        info = await self.get_instrument_info(ticker)
+        if info:
+            self._instruments_cache[ticker] = info
+            return info["ticker_t212"]
+
+        # Fallback: búsqueda parcial
         result = await self.search_instrument(ticker)
         if not result.success or not result.data:
             return None
