@@ -270,16 +270,14 @@ async def job_generate_signals() -> None:
             text += (
                 f"{emoji} *{s['ticker']}* → {s['type']} | Precio: {price_str}{score_str}\n"
             )
-            # Mostrar justificación completa
-            reasoning = s.get("reasoning", "")
+            # Mostrar campos estructurados de la señal
+            if s.get("margin_of_safety"):
+                text += f"  📏 MoS: {s['margin_of_safety']}%\n"
+            reasoning = s.get("reasoning") or s.get("reason", "")
             if reasoning:
-                # Limitar a 300 chars por señal para no desbordar
-                short = reasoning[:300]
-                if len(reasoning) > 300:
-                    short += "…"
-                text += f"{short}\n"
-            elif s.get("reason"):
-                text += f"  {s['reason']}\n"
+                first_sentence = reasoning.split('.')[0].strip()
+                if first_sentence:
+                    text += f"  📝 {first_sentence}.\n"
             if s.get("pnl_pct") is not None:
                 text += f"  💰 PnL actual: {s['pnl_pct']}%\n"
             text += "\n"
@@ -804,7 +802,8 @@ async def job_check_earnings_calendar() -> None:
                     "¿Qué esperar? Riesgos y oportunidades en 2-3 frases."
                 )
                 ai_analysis = await _call_llm(pre_prompt, max_tokens=200, context=f"pre_earnings_{ticker}_{market}")
-                text += f"  🧠 _Pre-earnings:_ {ai_analysis[:200]}…\n"
+                # Mostrar análisis completo (LLM ya genera 2-3 frases breves)
+                text += f"  🧠 _Pre-earnings:_ {ai_analysis}\n"
             except Exception as ex:
                 logger.warning(f"Error en análisis pre-earnings {ticker}: {ex}")
 

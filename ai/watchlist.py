@@ -1,11 +1,10 @@
 """
-Watchlist IA – genera y mantiene una watchlist de hasta 100 posiciones
+"""Watchlist IA – genera y mantiene una watchlist de hasta 25 posiciones
 (acciones + ETFs) fuera de la cartera que merecen estudio.
 
 La watchlist se compone de:
-  • Hasta ~80 acciones seleccionadas por la IA con análisis profundo
-    de industria y empresa (prompts especializados).
-  • Hasta ~20 ETFs complementarios alineados con la estrategia activa.
+  • Hasta 20 acciones seleccionadas por la IA.
+  • Hasta 5 ETFs complementarios alineados con la estrategia activa.
 """
 
 import asyncio
@@ -24,11 +23,11 @@ logger = logging.getLogger(__name__)
 
 # ── Configuración de tamaños ────────────────────────────────
 
-MAX_WATCHLIST_SIZE = 100
-MAX_STOCKS = 80
-MAX_ETFS = 20
+MAX_WATCHLIST_SIZE = 25
+MAX_STOCKS = 20
+MAX_ETFS = 5
 # Lote por llamada LLM (evita respuestas demasiado largas / costosas)
-STOCKS_PER_LLM_CALL = 20
+STOCKS_PER_LLM_CALL = 10
 
 # ── ETFs recomendados por estrategia ────────────────────────
 
@@ -330,14 +329,8 @@ async def _process_suggestions(
         target_entry = item.get("target_entry")
         target_exit = item.get("target_exit")
 
-        # Construir razón enriquecida
+        # Almacenar razón completa (el display se filtra en cada contexto)
         rich_reason = reason
-        if thesis:
-            rich_reason += f"\n📝 Tesis: {thesis}"
-        if catalysts:
-            rich_reason += f"\n🚀 Catalizadores: {catalysts}"
-        if risks:
-            rich_reason += f"\n⚠️ Riesgos: {risks}"
 
         # Obtener sector y precio real (solo para acciones; ETFs no tienen sector individual)
         sector = None
@@ -425,12 +418,12 @@ async def ai_generate_watchlist(
     current_portfolio_tickers: list[str],
 ) -> list[dict[str, Any]]:
     """
-    Pide a la IA que sugiera hasta 100 tickers (acciones + ETFs) para estudiar,
+    Pide a la IA que sugiera hasta 25 tickers (acciones + ETFs) para estudiar,
     excluyendo los que ya están en cartera.
 
-    Genera en varios lotes para no sobrecargar el LLM:
-      - Hasta 4 lotes de ~20 acciones = ~80 acciones
-      - 1 lote de ~20 ETFs
+    Genera en lotes para no sobrecargar el LLM:
+      - Hasta 2 lotes de ~10 acciones = ~20 acciones
+      - 1 lote de ~5 ETFs
     """
     excluded = ", ".join(current_portfolio_tickers) or "ninguno"
     active_strategy = await _get_active_strategy()
@@ -442,7 +435,7 @@ async def ai_generate_watchlist(
     # Calcular cuánto espacio queda
     remaining_total = MAX_WATCHLIST_SIZE - len(current_wl_tickers)
     if remaining_total <= 0:
-        logger.info("📋 Watchlist llena (100 items). No se generan más.")
+        logger.info("📋 Watchlist llena (25 items). No se generan más.")
         return []
 
     # Calcular cuántas acciones y ETFs actuales hay
@@ -634,7 +627,7 @@ async def _format_watchlist_item(item, index: int, analyzer) -> list[str]:
         # Mostrar objetivos de inversión si existen
         if obj:
             if obj.thesis:
-                lines.append(f"   📝 Tesis: {obj.thesis[:100]}")
+                lines.append(f"   📝 Tesis: {obj.thesis}")
             targets = []
             if obj.target_entry_price:
                 targets.append(f"Entrada: {format_price(obj.target_entry_price, currency)}")
@@ -652,9 +645,11 @@ async def _format_watchlist_item(item, index: int, analyzer) -> list[str]:
             if obj.conviction:
                 lines.append(f"   💪 Convicción: {obj.conviction}/10 | Horizonte: {obj.time_horizon or 'N/A'}")
             if obj.catalysts:
-                lines.append(f"   🚀 Catalizadores: {obj.catalysts[:80]}")
+                lines.append(f"   🚀 Catalizadores: {obj.catalysts}")
+            if obj.risks:
+                lines.append(f"   ⚠️ Riesgos: {obj.risks}")
         else:
-            lines.append(f"   Razón: {item.reason[:80] if item.reason else 'N/A'}")
+            lines.append(f"   Razón: {item.reason or 'N/A'}")
     except Exception:
         lines.append(f"{index}. ⚠️ *${item.ticker}* - Error obteniendo datos")
 

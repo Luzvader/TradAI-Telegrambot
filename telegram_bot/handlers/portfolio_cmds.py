@@ -97,12 +97,13 @@ async def cmd_cartera(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 f" | {sig.created_at.strftime('%d/%m %H:%M')}\n"
             )
 
-    # ── Watchlist ──
+    # ── Watchlist (resumen compacto: solo ticker + mercado) ──
     watchlist = await repo.get_active_watchlist()
     if watchlist:
-        text += f"\n📋 *Watchlist ({len(watchlist)}/5):*\n"
+        text += f"\n📋 *Watchlist ({len(watchlist)}/25):*\n"
         for w in watchlist:
-            text += f"  📌 {_escape_md(w.ticker)} — {_escape_md(w.reason or 'En estudio')}\n"
+            sector_str = f" | {_escape_md(w.sector)}" if w.sector else ""
+            text += f"  📌 {_escape_md(w.ticker)} ({_escape_md(w.market)}){sector_str}\n"
 
     # ── Earnings próximos ──
     positions = await repo.get_open_positions(real.id)

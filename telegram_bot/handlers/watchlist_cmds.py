@@ -21,6 +21,7 @@ async def cmd_watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
       /watchlist           → ver watchlist
       /watchlist generar   → IA genera nueva watchlist
       /watchlist quitar TICKER → quitar un ticker
+      /watchlist limpiar   → vaciar toda la watchlist
     """
     args = context.args or []
 
@@ -48,27 +49,29 @@ async def cmd_watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             for item in added:
                 conv = f" | Convicción: {item['conviction']}/10" if item.get('conviction') else ""
                 type_emoji = "📦" if item.get('asset_type') == 'etf' else "📊"
-                text += (
-                    f"{type_emoji} *${item['ticker']}* ({item['market']}){conv}\n"
-                    f"   Sector: {item.get('sector', 'N/A')}\n"
-                    f"   📝 {item['reason'][:120]}\n"
-                )
+                text += f"{type_emoji} *${item['ticker']}* ({item['market']}){conv}\n"
+                if item.get('sector'):
+                    text += f"   Sector: {item['sector']}\n"
                 if item.get("thesis"):
-                    text += f"   Tesis: {item['thesis'][:100]}\n"
+                    text += f"   📝 {item['thesis']}\n"
                 targets = []
                 if item.get("target_entry"):
-                    targets.append(f"Entrada: {item['target_entry']}$")
+                    from config.markets import format_price, MARKET_CURRENCY
+                    ccy = MARKET_CURRENCY.get(item['market'], 'USD')
+                    targets.append(f"Entrada: {format_price(item['target_entry'], ccy)}")
                 if item.get("target_exit"):
-                    targets.append(f"Salida: {item['target_exit']}$")
+                    from config.markets import format_price, MARKET_CURRENCY
+                    ccy = MARKET_CURRENCY.get(item['market'], 'USD')
+                    targets.append(f"Salida: {format_price(item['target_exit'], ccy)}")
                 if targets:
                     text += f"   🎯 {' | '.join(targets)}\n"
                 if item.get("catalysts"):
-                    text += f"   🚀 {item['catalysts'][:80]}\n"
+                    text += f"   🚀 {item['catalysts']}\n"
                 if item.get("risks"):
-                    text += f"   ⚠️ {item['risks'][:80]}\n"
+                    text += f"   ⚠️ {item['risks']}\n"
                 text += "\n"
         else:
-            text = "⚠️ No se pudieron añadir tickers. Puede estar llena (máx 100)."
+            text = "⚠️ No se pudieron añadir tickers. Puede estar llena (máx 25)."
         await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
     elif subcmd in ("quitar", "remove", "rm"):
@@ -86,12 +89,17 @@ async def cmd_watchlist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         else:
             await update.message.reply_text(f"❌ ${ticker} no está en la watchlist.")
 
+    elif subcmd in ("limpiar", "clear", "reset"):
+        count = await repo.clear_watchlist()
+        await update.message.reply_text(f"✅ Watchlist limpiada ({count} items eliminados).")
+
     else:
         await update.message.reply_text(
             "❌ Subcomando no reconocido.\n\n"
             "`/watchlist` — Ver\n"
             "`/watchlist generar` — Crear con IA\n"
-            "`/watchlist quitar TICKER` — Quitar",
+            "`/watchlist quitar TICKER` — Quitar un ticker\n"
+            "`/watchlist limpiar` — Vaciar toda la watchlist",
             parse_mode=ParseMode.MARKDOWN,
         )
 

@@ -95,7 +95,11 @@ async def analyze_closed_trade(
                     f"Precio={al.price_at_analysis} MoS={al.margin_of_safety}"
                 )
                 if al.reasoning:
-                    parts.append(f"    Razón: {al.reasoning[:200]}")
+                    parts.append(f"    Razón: {al.reasoning}")
+                if al.tech_summary:
+                    parts.append(f"    Técnico: {al.tech_summary}")
+                if al.price_summary:
+                    parts.append(f"    Precio: {al.price_summary}")
             analysis_context = (
                 "\nAnálisis previos almacenados:\n" + "\n".join(parts)
             )

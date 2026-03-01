@@ -43,7 +43,7 @@ async def cmd_objetivo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             source_emoji = "🤖" if obj.source == "ai" else "👤"
             text += f"{source_emoji} *${obj.ticker}* ({obj.market})\n"
             if obj.thesis:
-                text += f"   📝 {obj.thesis[:100]}\n"
+                text += f"   📝 {obj.thesis}\n"
             targets = []
             if obj.target_entry_price:
                 targets.append(f"Entrada: {obj.target_entry_price:.2f}$")
@@ -54,9 +54,9 @@ async def cmd_objetivo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             if obj.conviction:
                 text += f"   💪 Convicción: {obj.conviction}/10 | Horizonte: {obj.time_horizon or 'N/A'}\n"
             if obj.catalysts:
-                text += f"   🚀 {obj.catalysts[:80]}\n"
+                text += f"   🚀 {obj.catalysts}\n"
             if obj.risks:
-                text += f"   ⚠️ {obj.risks[:80]}\n"
+                text += f"   ⚠️ {obj.risks}\n"
             text += "\n"
         await _send_long(update, text)
         return

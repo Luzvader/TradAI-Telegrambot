@@ -31,7 +31,7 @@ from broker.bridge import (
 from config import settings
 from config.markets import market_display, MARKET_CURRENCY, format_price, get_currency_symbol
 from config.settings import ACCOUNT_CURRENCY, TIMEZONE
-from data.market_data import refresh_broker_prices
+from data.market_data import get_open_markets, is_market_open, refresh_broker_prices
 from data.news import save_context_snapshot
 from database import repository as repo
 from database.models import AutoModeType, OperationOrigin, PortfolioType
@@ -88,25 +88,29 @@ async def _process_auto_portfolio(config, now: datetime) -> None:
     """Procesa un portfolio en modo auto."""
     portfolio_id = config.portfolio_id
 
-    # ── Sync con Trading212 al inicio de cada ciclo ──
+    # ── Comprobar si hay algún mercado abierto ──
+    open_markets = get_open_markets()
+    markets_open = len(open_markets) > 0
+
+    # ── Sync con Trading212 al inicio de cada ciclo (siempre, para tener datos frescos) ──
     await _auto_sync_broker(portfolio_id)
 
-    # ── Scan de oportunidades ──
-    if _should_run(config.last_scan_at, config.scan_interval_minutes, now):
+    # ── Scan de oportunidades (solo con mercados abiertos) ──
+    if markets_open and _should_run(config.last_scan_at, config.scan_interval_minutes, now):
         await _auto_scan(portfolio_id, config.mode)
         await repo.update_auto_mode_timestamps(
             portfolio_id, last_scan_at=now
         )
 
-    # ── Análisis macro ──
+    # ── Análisis macro (puede ejecutarse sin mercados abiertos) ──
     if _should_run(config.last_macro_at, config.macro_interval_minutes, now):
         await _auto_macro(portfolio_id)
         await repo.update_auto_mode_timestamps(
             portfolio_id, last_macro_at=now
         )
 
-    # ── Re-análisis de posiciones ──
-    if _should_run(
+    # ── Re-análisis de posiciones (solo con mercados abiertos) ──
+    if markets_open and _should_run(
         config.last_analyze_at, config.analyze_interval_minutes, now
     ):
         await _auto_analyze_positions(portfolio_id, config)
@@ -114,14 +118,14 @@ async def _process_auto_portfolio(config, now: datetime) -> None:
             portfolio_id, last_analyze_at=now
         )
 
-    # ── Gestión de watchlist (usa el mismo intervalo que scan) ──
-    if config.watchlist_auto_manage:
+    # ── Gestión de watchlist (solo con mercados abiertos) ──
+    if config.watchlist_auto_manage and markets_open:
         last_wl = _last_watchlist_run.get(portfolio_id)
         if _should_run(last_wl, config.scan_interval_minutes, now):
             await _auto_manage_watchlist(portfolio_id, config)
             _last_watchlist_run[portfolio_id] = now
 
-    # ── Resumen diario ──
+    # ── Resumen diario (siempre) ──
     await _check_daily_summary(config, now)
 
 
@@ -290,12 +294,20 @@ async def _auto_analyze_positions(portfolio_id: int, config) -> None:
                     emoji = "🟢" if s["type"] == "BUY" else "🔴"
                     sig_ccy = MARKET_CURRENCY.get(s.get('market', 'NASDAQ'), 'USD')
                     price_str = format_price(s['price'], sig_ccy) if s.get('price') else "N/A"
-                    text += (
-                        f"{emoji} *{s['ticker']}* → {s['type']} | Precio: {price_str}\n"
-                        f"   {s.get('reason', s.get('reasoning', 'N/A')[:80])}\n"
-                    )
+                    score_val = s.get('overall_score', s.get('score'))
+                    score_str = f" | Score: {score_val:.0f}" if score_val else ""
+                    text += f"{emoji} *{s['ticker']}* → {s['type']} | Precio: {price_str}{score_str}\n"
                     if s.get("pnl_pct") is not None:
-                        text += f"   PnL: {s['pnl_pct']}%\n"
+                        text += f"   💰 PnL: {s['pnl_pct']}%\n"
+                    # Mostrar campos estructurados relevantes
+                    if s.get("margin_of_safety"):
+                        text += f"   📏 MoS: {s['margin_of_safety']}%\n"
+                    reason_line = s.get('reason') or s.get('reasoning')
+                    if reason_line:
+                        # Primera frase como resumen
+                        first_sentence = reason_line.split('.')[0].strip()
+                        if first_sentence:
+                            text += f"   📝 {first_sentence}.\n"
                     text += "\n"
 
                 if mode == AutoModeType.ON:
@@ -341,6 +353,11 @@ async def _auto_execute_buy(portfolio_id: int, signal: dict) -> None:
     price = signal.get("price")
     market = signal.get("market", "NASDAQ")
     if not ticker or not price:
+        return
+
+    # Guard: no operar si el mercado del ticker está cerrado
+    if not is_market_open(market):
+        logger.info(f"[AUTO-ON] Mercado {market} cerrado, compra de {ticker} aplazada")
         return
 
     try:
@@ -395,6 +412,11 @@ async def _auto_execute_sell(portfolio_id: int, signal: dict) -> None:
     price = signal.get("price")
     market = signal.get("market", "NASDAQ")
     if not ticker or not price:
+        return
+
+    # Guard: no operar si el mercado del ticker está cerrado
+    if not is_market_open(market):
+        logger.info(f"[AUTO-ON] Mercado {market} cerrado, venta de {ticker} aplazada")
         return
 
     try:
@@ -471,7 +493,11 @@ async def _send_buy_confirmation(portfolio_id: int, signal: dict) -> None:
     )
     reason = signal.get("reasoning", signal.get("reason", ""))
     if reason:
-        text += f"📝 {reason[:120]}\n"
+        first_sentence = reason.split('.')[0].strip()
+        if first_sentence:
+            text += f"📝 {first_sentence}.\n"
+    if signal.get("margin_of_safety"):
+        text += f"📏 MoS: {signal['margin_of_safety']}%\n"
 
     keyboard = InlineKeyboardMarkup([
         [
@@ -516,7 +542,9 @@ async def _send_sell_confirmation(portfolio_id: int, signal: dict) -> None:
     )
     reason = signal.get("reasoning", signal.get("reason", ""))
     if reason:
-        text += f"📝 {reason[:120]}\n"
+        first_sentence = reason.split('.')[0].strip()
+        if first_sentence:
+            text += f"📝 {first_sentence}.\n"
 
     keyboard = InlineKeyboardMarkup([
         [
@@ -674,12 +702,13 @@ async def _send_daily_summary(portfolio_id: int) -> None:
     else:
         text += "📡 _Sin señales en las últimas 24h_\n\n"
 
-    # ── 3. Estado de la watchlist ──
+    # ── 3. Estado de la watchlist (resumen: ticker + mercado + sector) ──
     watchlist = await repo.get_active_watchlist()
     if watchlist:
-        text += f"📋 *Watchlist ({len(watchlist)}/5):*\n"
+        text += f"📋 *Watchlist ({len(watchlist)}/25):*\n"
         for w in watchlist:
-            text += f"  📌 {w.ticker} ({market_display(w.market)}) — {w.reason or 'En estudio'}\n"
+            sector_str = f" | {w.sector}" if w.sector else ""
+            text += f"  📌 {w.ticker} ({market_display(w.market)}){sector_str}\n"
         text += "\n"
     else:
         text += "📋 _Watchlist vacía_\n\n"

@@ -44,6 +44,7 @@ from database.repos.signals import (  # noqa: F401
     get_signals_since,
     get_upcoming_earnings,
     has_recent_signal,
+    clear_watchlist,
     remove_from_watchlist,
     save_earnings_event,
     save_signal,

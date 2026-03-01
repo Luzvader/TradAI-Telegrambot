@@ -124,14 +124,14 @@ async def add_to_watchlist(
     ai_notes: str | None = None,
     asset_type: AssetType = AssetType.STOCK,
 ) -> WatchlistItem | None:
-    """Añade un ticker. Devuelve None si ya hay 100 activos."""
+    """Añade un ticker. Devuelve None si ya hay 25 activos (límite watchlist)."""
     async with async_session_factory() as session:
         count_stmt = select(func.count()).where(
             WatchlistItem.status == WatchlistStatus.ACTIVE
         )
         count_result = await session.execute(count_stmt)
         count = count_result.scalar() or 0
-        if count >= 100:
+        if count >= 25:
             return None
 
         item = WatchlistItem(
@@ -162,6 +162,22 @@ async def remove_from_watchlist(ticker: str) -> bool:
         item.removed_at = datetime.now(UTC)
         await session.commit()
         return True
+
+
+async def clear_watchlist() -> int:
+    """Marca todos los items activos como REMOVED. Devuelve el nº de items eliminados."""
+    async with async_session_factory() as session:
+        stmt = select(WatchlistItem).where(
+            WatchlistItem.status == WatchlistStatus.ACTIVE,
+        )
+        result = await session.execute(stmt)
+        items = result.scalars().all()
+        now = datetime.now(UTC)
+        for item in items:
+            item.status = WatchlistStatus.REMOVED
+            item.removed_at = now
+        await session.commit()
+        return len(items)
 
 
 # ── Earnings ─────────────────────────────────────────────────
