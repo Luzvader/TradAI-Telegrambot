@@ -16,8 +16,9 @@ from apscheduler.triggers.interval import IntervalTrigger
 from telegram import Bot
 from telegram.constants import ParseMode
 
-from config.markets import MARKETS
+from config.markets import MARKETS, MARKET_CURRENCY, format_price, get_currency_symbol
 from config.settings import (
+    ACCOUNT_CURRENCY,
     BACKTEST_CONTINUOUS_ENABLED,
     BACKTEST_INTERVAL_MINUTES,
     BACKTEST_MAX_TICKERS,
@@ -231,9 +232,10 @@ async def job_monitor_prices() -> None:
         if alerts:
             alert_text = "🚨 *ALERTAS DE PRECIO*\n\n"
             for a in alerts:
+                a_ccy = MARKET_CURRENCY.get(a.get('market', 'NASDAQ'), 'USD')
                 alert_text += (
-                    f"{a['type']} ${a['ticker']}\n"
-                    f"  Precio: {a['current_price']}$ | PnL: {a['pnl_pct']}%\n\n"
+                    f"{a['type']} {a['ticker']}\n"
+                    f"  Precio: {format_price(a['current_price'], a_ccy)} | PnL: {a['pnl_pct']}%\n\n"
                 )
             await _notify(alert_text)
 
@@ -262,10 +264,11 @@ async def job_generate_signals() -> None:
         text = "📡 *NUEVAS SEÑALES*\n\n"
         for s in actionable:
             emoji = "🟢" if s["type"] == "BUY" else "🔴"
-            price_str = f"{s['price']:.2f}$" if s.get('price') else "N/A"
+            s_ccy = MARKET_CURRENCY.get(s.get('market', 'NASDAQ'), 'USD')
+            price_str = format_price(s['price'], s_ccy) if s.get('price') else "N/A"
             score_str = f" | Score: {s['score']:.0f}" if s.get('score') else ""
             text += (
-                f"{emoji} *${s['ticker']}* → {s['type']} | Precio: {price_str}{score_str}\n"
+                f"{emoji} *{s['ticker']}* → {s['type']} | Precio: {price_str}{score_str}\n"
             )
             # Mostrar justificación completa
             reasoning = s.get("reasoning", "")
@@ -293,9 +296,10 @@ async def job_daily_summary() -> None:
     real = await repo.get_portfolio_by_type(PortfolioType.REAL)
     if real:
         summary = await get_portfolio_summary(real.id)
+        acct_sym = get_currency_symbol(summary.get('account_currency', ACCOUNT_CURRENCY))
         text += (
             f"*Cartera Real:*\n"
-            f"💰 {summary['total_value']:,.2f}$ "
+            f"💰 {summary['total_value']:,.2f}{acct_sym} "
             f"(PnL: {summary['total_pnl_pct']:+.2f}%)\n"
             f"📊 {summary['num_positions']} posiciones\n\n"
         )
@@ -303,9 +307,9 @@ async def job_daily_summary() -> None:
         # Alertas de posiciones
         for p in summary.get("positions", []):
             if p.get("stop_loss_hit"):
-                text += f"⚠️ ${p['ticker']}: STOP-LOSS alcanzado!\n"
+                text += f"⚠️ {p['ticker']}: STOP-LOSS alcanzado!\n"
             if p.get("take_profit_hit"):
-                text += f"🎯 ${p['ticker']}: TAKE-PROFIT alcanzado!\n"
+                text += f"🎯 {p['ticker']}: TAKE-PROFIT alcanzado!\n"
 
     # Watchlist
     watchlist = await repo.get_active_watchlist()
@@ -325,7 +329,7 @@ async def job_daily_summary() -> None:
                 for e in near:
                     mkt = e.get("market")
                     mkt_str = f" ({mkt})" if mkt else ""
-                    text += f"  ${e['ticker']}{mkt_str} en {e['days_until']} días\n"
+                    text += f"  {e['ticker']}{mkt_str} en {e['days_until']} días\n"
 
     await _notify(text)
 
@@ -500,7 +504,8 @@ async def job_weekly_benchmark() -> None:
             d = snap.snapshot_date.strftime("%d/%m") if hasattr(snap.snapshot_date, "strftime") else str(snap.snapshot_date)
             pnl = snap.pnl_pct or 0
             e = "🟢" if pnl >= 0 else "🔴"
-            text += f"  {d}: {snap.total_value:,.0f}$ ({e}{pnl:+.1f}%)\n"
+            snap_sym = get_currency_symbol(ACCOUNT_CURRENCY)
+            text += f"  {d}: {snap.total_value:,.0f}{snap_sym} ({e}{pnl:+.1f}%)\n"
 
     await _notify(text)
 
@@ -630,12 +635,13 @@ async def job_check_dividends_t212() -> None:
 
             text = f"💰 *DIVIDENDOS DETECTADOS ({len(recorded)})*\n\n"
 
+            div_sym = get_currency_symbol(ACCOUNT_CURRENCY)
             if t212_divs:
                 text += "🏦 *Trading212 (confirmados):*\n"
                 for d in t212_divs[:10]:
                     text += (
-                        f"  ${d['ticker']}: ${d['total']:.2f} "
-                        f"({d['shares']:.2f} acc × ${d['amount_per_share']:.4f})\n"
+                        f"  {d['ticker']}: {d['total']:.2f}{div_sym} "
+                        f"({d['shares']:.2f} acc × {d['amount_per_share']:.4f}{div_sym})\n"
                     )
                 text += "\n"
 
@@ -643,12 +649,12 @@ async def job_check_dividends_t212() -> None:
                 text += "📊 *yfinance (estimaciones):*\n"
                 for d in yf_divs[:5]:
                     text += (
-                        f"  ${d['ticker']}: ${d['total']:.2f} "
-                        f"({d['shares']:.2f} acc × ${d['amount_per_share']:.4f})\n"
+                        f"  {d['ticker']}: {d['total']:.2f}{div_sym} "
+                        f"({d['shares']:.2f} acc × {d['amount_per_share']:.4f}{div_sym})\n"
                     )
 
             total = sum(d["total"] for d in recorded)
-            text += f"\n💵 Total: ${total:,.2f}"
+            text += f"\n💵 Total: {total:,.2f}{div_sym}"
             await _notify(text)
             logger.info(f"💰 {len(recorded)} dividendos registrados (T212: {len(t212_divs)}, yf: {len(yf_divs)})")
     except Exception as e:
@@ -671,13 +677,14 @@ async def job_check_custom_alerts() -> None:
             triggered = False
             detail = ""
 
+            alert_ccy = MARKET_CURRENCY.get(market, 'USD')
             if alert.alert_type == "precio_max" and price >= alert.threshold:
                 triggered = True
-                detail = f"💵 Precio: {price:.2f}$ ≥ {alert.threshold:.2f}$"
+                detail = f"💵 Precio: {format_price(price, alert_ccy)} ≥ {format_price(alert.threshold, alert_ccy)}"
 
             elif alert.alert_type == "precio_min" and price <= alert.threshold:
                 triggered = True
-                detail = f"💵 Precio: {price:.2f}$ ≤ {alert.threshold:.2f}$"
+                detail = f"💵 Precio: {format_price(price, alert_ccy)} ≤ {format_price(alert.threshold, alert_ccy)}"
 
             elif alert.alert_type == "volumen":
                 # Alerta de spike de volumen
@@ -717,7 +724,7 @@ async def job_check_custom_alerts() -> None:
                 await repo.trigger_alert(alert.id)
                 text = (
                     f"🔔 *ALERTA DISPARADA*\n\n"
-                    f"📌 ${alert.ticker} — {alert.alert_type}\n"
+                    f"📌 {alert.ticker} — {alert.alert_type}\n"
                     f"{detail}\n"
                 )
                 if alert.message:

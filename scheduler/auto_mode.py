@@ -29,8 +29,8 @@ from broker.bridge import (
     sync_cash_from_broker,
 )
 from config import settings
-from config.markets import market_display
-from config.settings import TIMEZONE
+from config.markets import market_display, MARKET_CURRENCY, format_price, get_currency_symbol
+from config.settings import ACCOUNT_CURRENCY, TIMEZONE
 from data.market_data import refresh_broker_prices
 from data.news import save_context_snapshot
 from database import repository as repo
@@ -222,9 +222,10 @@ async def _auto_scan(portfolio_id: int, mode: AutoModeType) -> None:
         mode_label = "🟢 ON" if mode == AutoModeType.ON else "🛡️ SAFE"
         text = f"🤖 *MODO AUTO ({mode_label}) — Oportunidades detectadas*\n\n"
         for i, opp in enumerate(strong, 1):
-            price_str = f"{opp['price']:.2f}$" if opp.get('price') else "N/A"
+            opp_ccy = MARKET_CURRENCY.get(opp.get('market', 'NASDAQ'), 'USD')
+            price_str = format_price(opp['price'], opp_ccy) if opp.get('price') else "N/A"
             text += (
-                f"{i}. 🟢 *${opp['ticker']}* — Score: {opp['overall_score']:.0f}/100 | Precio: {price_str}\n"
+                f"{i}. 🟢 *{opp['ticker']}* — Score: {opp['overall_score']:.0f}/100 | Precio: {price_str}\n"
                 f"   V:{opp['value_score']:.0f} Q:{opp['quality_score']:.0f} S:{opp['safety_score']:.0f}\n"
                 f"   MoS: {opp.get('margin_of_safety', 'N/A')}%\n\n"
             )
@@ -287,9 +288,10 @@ async def _auto_analyze_positions(portfolio_id: int, config) -> None:
                 text = f"🤖 *MODO AUTO ({mode_label}) — Señales*\n\n"
                 for s in actionable:
                     emoji = "🟢" if s["type"] == "BUY" else "🔴"
-                    price_str = f"{s['price']:.2f}$" if s.get('price') else "N/A"
+                    sig_ccy = MARKET_CURRENCY.get(s.get('market', 'NASDAQ'), 'USD')
+                    price_str = format_price(s['price'], sig_ccy) if s.get('price') else "N/A"
                     text += (
-                        f"{emoji} *${s['ticker']}* → {s['type']} | Precio: {price_str}\n"
+                        f"{emoji} *{s['ticker']}* → {s['type']} | Precio: {price_str}\n"
                         f"   {s.get('reason', s.get('reasoning', 'N/A')[:80])}\n"
                     )
                     if s.get("pnl_pct") is not None:
@@ -319,9 +321,10 @@ async def _auto_analyze_positions(portfolio_id: int, config) -> None:
             if alerts:
                 text = f"🤖 *MODO AUTO — ⚠️ Alertas*\n\n"
                 for a in alerts:
+                    aa_ccy = MARKET_CURRENCY.get(a.get('market', 'NASDAQ'), 'USD')
                     text += (
-                        f"{a['type']} *${a['ticker']}*\n"
-                        f"   Precio: {a['current_price']}$ | PnL: {a['pnl_pct']}%\n\n"
+                        f"{a['type']} *{a['ticker']}*\n"
+                        f"   Precio: {format_price(a['current_price'], aa_ccy)} | PnL: {a['pnl_pct']}%\n\n"
                     )
                 await _notify(text)
 
@@ -367,19 +370,20 @@ async def _auto_execute_buy(portfolio_id: int, signal: dict) -> None:
         )
 
         if result["success"]:
+            buy_ccy = MARKET_CURRENCY.get(market, 'USD')
             text = (
                 f"🤖 *AUTO-ON — Compra ejecutada* ✅\n\n"
-                f"📌 *${ticker}* ({market})\n"
-                f"💵 Precio: {price:.2f}$\n"
+                f"📌 *{ticker}* ({market})\n"
+                f"💵 Precio: {format_price(price, buy_ccy)}\n"
                 f"📊 Acciones: {result.get('shares', shares):.4f}\n"
-                f"💰 Total: {result.get('amount', 0):.2f}$\n"
+                f"💰 Total: {format_price(result.get('amount', 0), buy_ccy)}\n"
             )
             if result.get("broker_executed"):
                 text += "🏦 Broker: Trading212 ✅\n"
             await _notify(text)
         else:
             logger.error(f"[AUTO-ON] Error comprando {ticker}: {result.get('error')}")
-            await _notify(f"🤖 ❌ AUTO-ON — Error comprando *${ticker}*: {result.get('error')}")
+            await _notify(f"🤖 ❌ AUTO-ON — Error comprando *{ticker}*: {result.get('error')}")
 
     except Exception as e:
         logger.error(f"[AUTO-ON] Excepción comprando {ticker}: {e}")
@@ -413,19 +417,21 @@ async def _auto_execute_sell(portfolio_id: int, signal: dict) -> None:
             pnl = result.get("pnl", 0)
             pnl_pct = result.get("pnl_pct", 0)
             pnl_emoji = "🟢" if pnl >= 0 else "🔴"
+            sell_ccy = MARKET_CURRENCY.get(market, 'USD')
+            sell_sym = get_currency_symbol(sell_ccy)
             text = (
                 f"🤖 *AUTO-ON — Venta ejecutada* ✅\n\n"
-                f"📌 *${ticker}* ({market})\n"
-                f"💵 Precio: {price:.2f}$\n"
+                f"📌 *{ticker}* ({market})\n"
+                f"💵 Precio: {format_price(price, sell_ccy)}\n"
                 f"📊 Acciones: {result.get('shares_sold', position.shares):.4f}\n"
-                f"{pnl_emoji} PnL: {pnl:+.2f}$ ({pnl_pct:+.2f}%)\n"
+                f"{pnl_emoji} PnL: {pnl:+.2f}{sell_sym} ({pnl_pct:+.2f}%)\n"
             )
             if result.get("broker_executed"):
                 text += "🏦 Broker: Trading212 ✅\n"
             await _notify(text)
         else:
             logger.error(f"[AUTO-ON] Error vendiendo {ticker}: {result.get('error')}")
-            await _notify(f"🤖 ❌ AUTO-ON — Error vendiendo *${ticker}*: {result.get('error')}")
+            await _notify(f"🤖 ❌ AUTO-ON — Error vendiendo *{ticker}*: {result.get('error')}")
 
     except Exception as e:
         logger.error(f"[AUTO-ON] Excepción vendiendo {ticker}: {e}")
@@ -455,11 +461,12 @@ async def _send_buy_confirmation(portfolio_id: int, signal: dict) -> None:
         shares = 0
         amount = 0
 
+    safe_buy_ccy = MARKET_CURRENCY.get(market, 'USD')
     text = (
         f"🛡️ *MODO SAFE — ¿Confirmar COMPRA?*\n\n"
-        f"📌 *${ticker}* ({market})\n"
-        f"💵 Precio: {price:.2f}$\n"
-        f"📊 Acciones: ~{shares:.4f} (~{amount:.2f}$)\n"
+        f"📌 *{ticker}* ({market})\n"
+        f"💵 Precio: {format_price(price, safe_buy_ccy)}\n"
+        f"📊 Acciones: ~{shares:.4f} (~{format_price(amount, safe_buy_ccy)})\n"
         f"⭐ Score: {score}\n"
     )
     reason = signal.get("reasoning", signal.get("reason", ""))
@@ -499,10 +506,11 @@ async def _send_sell_confirmation(portfolio_id: int, signal: dict) -> None:
         pnl_pct = 0
 
     pnl_emoji = "🟢" if pnl_pct >= 0 else "🔴"
+    safe_sell_ccy = MARKET_CURRENCY.get(market, 'USD')
     text = (
         f"🛡️ *MODO SAFE — ¿Confirmar VENTA?*\n\n"
-        f"📌 *${ticker}* ({market})\n"
-        f"💵 Precio: {price:.2f}$\n"
+        f"📌 *{ticker}* ({market})\n"
+        f"💵 Precio: {format_price(price, safe_sell_ccy)}\n"
         f"📊 Acciones: {shares:.4f}\n"
         f"{pnl_emoji} PnL estimado: {pnl_pct:+.2f}%\n"
     )
@@ -593,11 +601,13 @@ async def _send_daily_summary(portfolio_id: int) -> None:
     text += f"📋 *Estrategia activa:* {strategy.upper()}\n\n"
 
     summary = await get_portfolio_summary(portfolio_id)
+    acct_ccy = summary.get('account_currency', ACCOUNT_CURRENCY)
+    acct_sym = get_currency_symbol(acct_ccy)
     text += (
         f"💰 *CARTERA {portfolio.name.upper()}*\n"
-        f"   Valor: {summary['total_value']:,.2f}$\n"
-        f"   Invertido: {summary['total_invested']:,.2f}$\n"
-        f"   PnL: {summary['total_pnl']:+,.2f}$ ({summary['total_pnl_pct']:+.2f}%)\n"
+        f"   Valor: {summary['total_value']:,.2f}{acct_sym}\n"
+        f"   Invertido: {summary['total_invested']:,.2f}{acct_sym}\n"
+        f"   PnL: {summary['total_pnl']:+,.2f}{acct_sym} ({summary['total_pnl_pct']:+.2f}%)\n"
         f"   Posiciones: {summary['num_positions']}\n"
     )
 
@@ -623,8 +633,10 @@ async def _send_daily_summary(portfolio_id: int) -> None:
                 alert = " ⚠️ SL!"
             elif p.get("take_profit_hit"):
                 alert = " 🎯 TP!"
+            pos_ccy = p.get('currency', MARKET_CURRENCY.get(p.get('market', 'NASDAQ'), 'USD'))
+            pos_sym = get_currency_symbol(pos_ccy)
             text += (
-                f"  {emoji} {p['ticker']} — {p['pnl']:+.2f}$ "
+                f"  {emoji} {p['ticker']} — {p['pnl']:+.2f}{pos_sym} "
                 f"({p['pnl_pct']:+.1f}%) | Peso: {p['weight_pct']:.1f}%{alert}\n"
             )
         text += "\n"
@@ -646,7 +658,12 @@ async def _send_daily_summary(portfolio_id: int) -> None:
         text += f"📡 *Señales últimas 24h ({len(signals)}):*\n"
         for sig in signals[:10]:
             emoji = "🟢" if sig.signal_type.value == "BUY" else "🔴" if sig.signal_type.value == "SELL" else "🟡"
-            price_str = f" | {sig.price:.2f}$" if sig.price else ""
+            if sig.price:
+                sig_mkt = getattr(sig, 'market', None) or 'NASDAQ'
+                sig_ccy = MARKET_CURRENCY.get(sig_mkt, 'USD')
+                price_str = f" | {format_price(sig.price, sig_ccy)}"
+            else:
+                price_str = ""
             text += (
                 f"  {emoji} {sig.ticker} → {sig.signal_type.value}{price_str}"
             )
@@ -688,7 +705,7 @@ async def _send_daily_summary(portfolio_id: int) -> None:
         # Resumen compacto de posiciones (no enviar JSON completo)
         pos_summary = ""
         for p in summary.get("positions", []):
-            pos_summary += f"  ${p['ticker']}: PnL {p['pnl_pct']:+.1f}%, peso {p['weight_pct']:.1f}%\n"
+            pos_summary += f"  {p['ticker']}: PnL {p['pnl_pct']:+.1f}%, peso {p['weight_pct']:.1f}%\n"
 
         sector_str = ", ".join(
             f"{s}:{w:.0f}%" for s, w in sorted(
@@ -697,7 +714,7 @@ async def _send_daily_summary(portfolio_id: int) -> None:
         )
 
         analysis_prompt = f"""Análisis breve de cartera {strategy}:
-Valor: {summary['total_value']:,.0f}$ | Invertido: {summary['total_invested']:,.0f}$ | PnL: {summary['total_pnl_pct']:+.1f}%
+Valor: {summary['total_value']:,.0f}{acct_sym} | Invertido: {summary['total_invested']:,.0f}{acct_sym} | PnL: {summary['total_pnl_pct']:+.1f}%
 Posiciones ({summary['num_positions']}):
 {pos_summary}Sectores: {sector_str}
 

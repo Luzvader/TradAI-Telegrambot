@@ -16,7 +16,10 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from config.markets import MARKET_CURRENCY, get_currency_symbol, format_price
+from config.settings import ACCOUNT_CURRENCY
 from data.fundamentals import get_sector
+from data.fx import get_fx_rate
 from data.market_data import get_prices_batch, refresh_broker_prices
 from database import repository as repo
 from database.models import (
@@ -144,8 +147,8 @@ async def execute_buy(
     await repo.adjust_cash(portfolio_id, -amount_usd)
 
     logger.info(
-        f"🟢 BUY {ticker}: {shares:.4f} acciones a {price}$ "
-        f"(total: {amount_usd}$)"
+        f"🟢 BUY {ticker}: {shares:.4f} acciones a {format_price(price, MARKET_CURRENCY.get(market, 'USD'))} "
+        f"(total: {format_price(amount_usd, MARKET_CURRENCY.get(market, 'USD'))})"
     )
 
     return {
@@ -262,8 +265,8 @@ async def execute_sell(
     pnl_pct = ((price - position.avg_price) / position.avg_price * 100) if position.avg_price > 0 else 0
 
     logger.info(
-        f"🔴 SELL {ticker}: {shares:.4f} acciones a {price}$ "
-        f"(PnL: {pnl:+.2f}$ / {pnl_pct:+.1f}%)"
+        f"🔴 SELL {ticker}: {shares:.4f} acciones a {format_price(price, MARKET_CURRENCY.get(market, 'USD'))} "
+        f"(PnL: {pnl:+.2f} / {pnl_pct:+.1f}%)"
     )
 
     # Auto-invocar aprendizaje al cerrar posición
@@ -387,12 +390,17 @@ async def execute_sell(
 
 
 async def get_portfolio_summary(portfolio_id: int) -> dict[str, Any]:
-    """Genera un resumen completo del portfolio."""
+    """Genera un resumen completo del portfolio.
+
+    Los precios por posición se muestran en su divisa nativa (market currency).
+    Los totales (valor, PnL, cash) se convierten a ACCOUNT_CURRENCY.
+    """
     portfolio = await repo.get_portfolio(portfolio_id)
     if portfolio is None:
         return {"error": "Portfolio no encontrado"}
 
     positions = list(await repo.get_open_positions(portfolio_id))
+    acct_ccy = ACCOUNT_CURRENCY
 
     # Para cartera REAL, refrescar precios T212 antes de usar get_prices_batch
     if portfolio.portfolio_type == PortfolioType.REAL:
@@ -427,25 +435,42 @@ async def get_portfolio_summary(portfolio_id: int) -> dict[str, Any]:
             except Exception as e:
                 logger.debug(f"Error actualizando sector de {pos.ticker}: {e}")
 
-    total_value = calculate_portfolio_value(positions)
-    total_invested = sum(p.avg_price * p.shares for p in positions)
-    total_current = sum(
-        (p.current_price or p.avg_price) * p.shares for p in positions
-    )
-    total_pnl = total_current - total_invested
-    total_pnl_pct = (total_pnl / total_invested * 100) if total_invested > 0 else 0
+    # Pre-calcular FX rates por mercado → ACCOUNT_CURRENCY
+    fx_rates: dict[str, float] = {}
+    markets_in_use = set(p.market for p in positions)
+    for market in markets_in_use:
+        native_ccy = MARKET_CURRENCY.get(market, "USD")
+        if native_ccy not in fx_rates:
+            fx_rates[native_ccy] = await asyncio.to_thread(
+                get_fx_rate, native_ccy, acct_ccy
+            )
 
-    # Cash disponible
-    cash = portfolio.cash or 0
-    total_with_cash = total_value + cash
+    def _to_acct(amount: float, market: str) -> float:
+        """Convierte un importe de la divisa del mercado a ACCOUNT_CURRENCY."""
+        native_ccy = MARKET_CURRENCY.get(market, "USD")
+        return amount * fx_rates.get(native_ccy, 1.0)
+
+    # Totales en ACCOUNT_CURRENCY
+    total_value_acct = 0.0
+    total_invested_acct = 0.0
+    total_current_acct = 0.0
 
     # Detalle por posición
     pos_details = []
     for p in positions:
         cur = p.current_price or p.avg_price
-        pnl = (cur - p.avg_price) * p.shares
+        native_ccy = MARKET_CURRENCY.get(p.market, "USD")
+        pnl_native = (cur - p.avg_price) * p.shares
         pnl_pct = ((cur - p.avg_price) / p.avg_price * 100) if p.avg_price > 0 else 0
-        weight = (cur * p.shares / total_value * 100) if total_value > 0 else 0
+
+        # Valor en divisa de la cuenta
+        val_acct = _to_acct(cur * p.shares, p.market)
+        invested_acct = _to_acct(p.avg_price * p.shares, p.market)
+        pnl_acct = val_acct - invested_acct
+
+        total_value_acct += val_acct
+        total_invested_acct += invested_acct
+        total_current_acct += val_acct
 
         sl_tp = check_stop_loss_take_profit(p)
 
@@ -453,39 +478,57 @@ async def get_portfolio_summary(portfolio_id: int) -> dict[str, Any]:
             "ticker": p.ticker,
             "market": p.market,
             "sector": p.sector,
+            "currency": native_ccy,
             "shares": round(p.shares, 4),
             "avg_price": round(p.avg_price, 4),
             "current_price": round(cur, 4),
-            "pnl": round(pnl, 2),
+            "pnl": round(pnl_native, 2),
             "pnl_pct": round(pnl_pct, 2),
-            "weight_pct": round(weight, 2),
+            "pnl_acct": round(pnl_acct, 2),
+            "value_acct": round(val_acct, 2),
+            "weight_pct": 0,  # Se calcula abajo con total
             "stop_loss": p.stop_loss,
             "take_profit": p.take_profit,
             "stop_loss_hit": sl_tp["stop_loss_hit"],
             "take_profit_hit": sl_tp["take_profit_hit"],
         })
 
-    # Concentración por sector
+    # Calcular pesos con totales
+    for pd in pos_details:
+        pd["weight_pct"] = round(
+            pd["value_acct"] / total_value_acct * 100, 2
+        ) if total_value_acct > 0 else 0
+
+    total_pnl_acct = total_current_acct - total_invested_acct
+    total_pnl_pct = (
+        total_pnl_acct / total_invested_acct * 100
+    ) if total_invested_acct > 0 else 0
+
+    # Cash disponible (ya está en ACCOUNT_CURRENCY, viene del broker)
+    cash = portfolio.cash or 0
+    total_with_cash = total_value_acct + cash
+
+    # Concentración por sector (en ACCOUNT_CURRENCY)
     sector_weights: dict[str, float] = {}
-    for p in positions:
-        s = p.sector or "Unknown"
-        val = (p.current_price or p.avg_price) * p.shares
-        sector_weights[s] = sector_weights.get(s, 0) + val
+    for pd in pos_details:
+        s = pd["sector"] or "Unknown"
+        sector_weights[s] = sector_weights.get(s, 0) + pd["value_acct"]
 
     sector_pcts = {
-        s: round(v / total_value * 100, 2) if total_value > 0 else 0
+        s: round(v / total_value_acct * 100, 2) if total_value_acct > 0 else 0
         for s, v in sector_weights.items()
     }
 
     return {
         "portfolio_name": portfolio.name,
         "portfolio_type": portfolio.portfolio_type.value,
-        "total_value": round(total_value, 2),
+        "account_currency": acct_ccy,
+        "total_value": round(total_value_acct, 2),
         "total_with_cash": round(total_with_cash, 2),
         "cash": round(cash, 2),
         "initial_capital": round(portfolio.initial_capital or 0, 2),
-        "total_invested": round(total_invested, 2),
-        "total_pnl": round(total_pnl, 2),
+        "total_invested": round(total_invested_acct, 2),
+        "total_pnl": round(total_pnl_acct, 2),
         "total_pnl_pct": round(total_pnl_pct, 2),
         "num_positions": len(positions),
         "positions": pos_details,

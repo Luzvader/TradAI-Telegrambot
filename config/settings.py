@@ -85,6 +85,13 @@ DEFAULT_TAKE_PROFIT_PCT: float = _get_float("DEFAULT_TAKE_PROFIT_PCT", 0.25)
 SIGNAL_BUY_THRESHOLD: float = _get_float("SIGNAL_BUY_THRESHOLD", 70.0)
 SIGNAL_SELL_THRESHOLD: float = _get_float("SIGNAL_SELL_THRESHOLD", 30.0)
 SCAN_MIN_SCORE: float = _get_float("SCAN_MIN_SCORE", 65.0)
+
+# ── Divisa de la cuenta ──────────────────────────────────────
+# Moneda base de la cuenta del broker (EUR para cuentas europeas T212).
+# Los totales de cartera se muestran en esta divisa.
+# Se auto-detecta del broker si no se establece manualmente.
+ACCOUNT_CURRENCY: str = os.getenv("ACCOUNT_CURRENCY", "EUR")
+
 # ── Web Dashboard ────────────────────────────────────────────
 WEB_ENABLED: bool = _get_bool("WEB_ENABLED", True)
 WEB_PORT: int = _get_int("WEB_PORT", 8080)

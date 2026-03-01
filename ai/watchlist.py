@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from ai.analyst import _call_llm
+from config.markets import format_price, get_currency_symbol, MARKET_CURRENCY
 from data.fundamentals import fetch_fundamentals
 from database import repository as repo
 from database.models import AssetType, PortfolioType, StrategyType
@@ -118,6 +119,7 @@ _JSON_FORMAT = (
     "  {\n"
     '    "ticker": "AAPL",\n'
     '    "market": "NASDAQ",\n'
+    '    "currency": "USD",\n'
     '    "reason": "razón detallada de por qué merece estudio",\n'
     '    "thesis": "tesis de inversión concisa",\n'
     '    "target_entry": 150.0,\n'
@@ -130,8 +132,19 @@ _JSON_FORMAT = (
     "]\n"
     "Sin explicaciones adicionales, solo el JSON.\n"
     "conviction: 1-10 (1=baja, 10=muy alta)\n"
-    "time_horizon: corto (<6m), medio (6-24m), largo (>24m)\n"
-    "target_entry y target_exit: precios en la moneda del mercado\n"
+    "time_horizon: corto (<6m), medio (6-24m), largo (>24m)\n\n"
+    "IMPORTANTE sobre tickers y precios:\n"
+    "- USA (NASDAQ/NYSE): ticker sin sufijo (ej: AAPL, MRK), moneda USD\n"
+    "- España (IBEX): ticker sin sufijo .MC (ej: SAN, BBVA, TEF), moneda EUR\n"
+    "- Alemania (XETRA): ticker sin sufijo .DE (ej: SAP, SIE), moneda EUR\n"
+    "- Francia (EURONEXT_PARIS): ticker sin sufijo .PA (ej: MC, TTE, ORA), moneda EUR\n"
+    "- Italia (BORSA_ITALIANA): ticker sin sufijo .MI (ej: ISP, UCG), moneda EUR\n"
+    "- UK (LSE): ticker sin sufijo .L (ej: SHEL, AZN, VOD), moneda GBp (peniques)\n"
+    "- Países Bajos (EURONEXT_AMSTERDAM): ticker sin sufijo .AS (ej: ASML), moneda EUR\n"
+    "- target_entry y target_exit DEBEN estar en la moneda nativa del mercado\n"
+    "  (USD para US, EUR para Europa continental, GBp para LSE)\n"
+    "- target_entry < target_exit siempre\n"
+    "- target_entry debe ser ≤ precio actual (zona de compra atractiva)\n"
 )
 
 # ── Prompts de análisis profundo de INDUSTRIA ────────────────
@@ -326,14 +339,41 @@ async def _process_suggestions(
         if risks:
             rich_reason += f"\n⚠️ Riesgos: {risks}"
 
-        # Obtener sector (solo para acciones; ETFs no tienen sector individual)
+        # Obtener sector y precio real (solo para acciones; ETFs no tienen sector individual)
         sector = None
+        actual_price = None
+        actual_currency = None
         if asset_type == AssetType.STOCK:
             try:
                 fd = await asyncio.to_thread(fetch_fundamentals, ticker, market)
                 sector = fd.sector
+                actual_price = fd.current_price
+                actual_currency = fd.currency
             except Exception:
                 pass
+
+        # ── Sanity check de targets vs precio real ──
+        if actual_price and actual_price > 0:
+            entry = float(target_entry) if target_entry else None
+            exit_ = float(target_exit) if target_exit else None
+
+            # Si los targets son absurdos (>5x o <0.2x del precio), invalidarlos
+            if entry and (entry > actual_price * 5 or entry < actual_price * 0.05):
+                logger.warning(
+                    f"Watchlist {ticker}: target_entry {entry} incoherente "
+                    f"con precio real {actual_price} {actual_currency} — descartado"
+                )
+                target_entry = None
+            if exit_ and (exit_ > actual_price * 10 or exit_ < actual_price * 0.05):
+                logger.warning(
+                    f"Watchlist {ticker}: target_exit {exit_} incoherente "
+                    f"con precio real {actual_price} {actual_currency} — descartado"
+                )
+                target_exit = None
+            # Si entry > exit, swap (LLM a veces invierte)
+            if target_entry and target_exit:
+                if float(target_entry) > float(target_exit):
+                    target_entry, target_exit = target_exit, target_entry
 
         ai_notes_prefix = "📊 Acción" if asset_type == AssetType.STOCK else "📦 ETF"
         wl_item = await repo.add_to_watchlist(
@@ -503,6 +543,7 @@ async def refresh_watchlist_analysis() -> list[dict[str, Any]]:
                 if hasattr(item, 'asset_type') and item.asset_type
                 else "stock"
             )
+            currency = fd.currency or MARKET_CURRENCY.get(item.market, "USD")
             results.append({
                 "ticker": item.ticker,
                 "market": item.market,
@@ -513,6 +554,8 @@ async def refresh_watchlist_analysis() -> list[dict[str, Any]]:
                 "signal": vs.signal,
                 "reasoning": vs.reasoning,
                 "strategy": vs.strategy,
+                "currency": currency,
+                "current_price": fd.current_price,
             })
         except Exception as e:
             logger.warning(f"Error analizando watchlist {item.ticker}: {e}")
@@ -558,26 +601,54 @@ async def _format_watchlist_item(item, index: int, analyzer) -> list[str]:
             lines.append(f"{index}. ⚠️ *${item.ticker}* ({item.market}) - Sin datos disponibles")
             return lines
         vs = await asyncio.to_thread(analyzer, fd)
-        emoji = "🟢" if vs.signal == "BUY" else "🔴" if vs.signal == "SELL" else "🟡"
-        price_str = f"{fd.current_price:.2f}$" if fd.current_price is not None else "N/D"
+
+        # Moneda real del activo
+        currency = fd.currency or MARKET_CURRENCY.get(item.market, "USD")
+        price_str = format_price(fd.current_price, currency)
         pe_str = f"{fd.pe_ratio:.1f}" if fd.pe_ratio is not None else "N/D"
+
+        # Obtener objetivos para sanity check de señal
+        obj = await repo.get_investment_objective(item.ticker, market=item.market)
+        signal = vs.signal
+        signal_note = ""
+
+        if obj:
+            entry = obj.target_entry_price
+            exit_ = obj.target_exit_price
+            price = fd.current_price
+
+            # Sanity checks de señal vs targets
+            if signal == "BUY" and exit_ and price > exit_:
+                signal = "HOLD"
+                signal_note = " (precio > salida)"
+            elif signal == "BUY" and entry and price > entry * 1.15:
+                signal_note = " (por encima de entrada)"
+
+        emoji = "🟢" if signal == "BUY" else "🔴" if signal == "SELL" else "🟡"
         lines.append(
             f"{index}. {emoji} *${item.ticker}* ({item.market})\n"
-            f"   Score: {vs.overall_score:.0f}/100 | Signal: {vs.signal} | Strat: {vs.strategy}\n"
-            f"   Precio: {price_str} | P/E: {pe_str}"
+            f"   Score: {vs.overall_score:.0f}/100 | Signal: {signal}{signal_note} | Strat: {vs.strategy}\n"
+            f"   Precio: {price_str} | P/E: {pe_str} | Moneda: {currency}"
         )
+
         # Mostrar objetivos de inversión si existen
-        obj = await repo.get_investment_objective(item.ticker, market=item.market)
         if obj:
             if obj.thesis:
                 lines.append(f"   📝 Tesis: {obj.thesis[:100]}")
             targets = []
             if obj.target_entry_price:
-                targets.append(f"Entrada: {obj.target_entry_price:.2f}$")
+                targets.append(f"Entrada: {format_price(obj.target_entry_price, currency)}")
             if obj.target_exit_price:
-                targets.append(f"Salida: {obj.target_exit_price:.2f}$")
+                targets.append(f"Salida: {format_price(obj.target_exit_price, currency)}")
             if targets:
-                lines.append(f"   🎯 {' | '.join(targets)}")
+                # Señalar incoherencias visualmente
+                coherence = ""
+                if obj.target_entry_price and obj.target_exit_price and fd.current_price:
+                    if fd.current_price > obj.target_exit_price:
+                        coherence = " ⚠️ Precio > Salida"
+                    elif fd.current_price < obj.target_entry_price:
+                        coherence = " 💤 Precio < Entrada (esperar)"
+                lines.append(f"   🎯 {' | '.join(targets)}{coherence}")
             if obj.conviction:
                 lines.append(f"   💪 Convicción: {obj.conviction}/10 | Horizonte: {obj.time_horizon or 'N/A'}")
             if obj.catalysts:

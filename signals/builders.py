@@ -4,6 +4,7 @@ y justificaciones estructuradas para señales.
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from data.fundamentals import FundamentalData
@@ -13,17 +14,26 @@ from strategy import technical_analyst, price_analyst
 logger = logging.getLogger(__name__)
 
 
-async def compute_deterministic_context(
+@dataclass
+class DiagnosticsResult:
+    """Resultado de compute_diagnostics: contexto + diagnósticos reutilizables."""
+    context_text: str
+    tech_diag: Any | None = None
+    price_diag: Any | None = None
+
+
+async def compute_diagnostics(
     ticker: str,
     fd: FundamentalData,
     market: str | None = None,
-) -> str:
+) -> DiagnosticsResult:
     """
-    Ejecuta los analizadores técnico y de precio de forma determinista
-    y devuelve el texto formateado listo para inyectar en prompts IA.
-    Ahorra tokens porque la IA no tiene que calcular esto ella misma.
+    Ejecuta los analizadores técnico y de precio de forma determinista.
+    Devuelve el texto formateado Y los objetos de diagnóstico para reuso.
     """
     parts: list[str] = []
+    tech_diag = None
+    price_diag = None
 
     # Análisis técnico
     try:
@@ -48,7 +58,24 @@ async def compute_deterministic_context(
     except Exception as e:
         logger.debug(f"No se pudo obtener análisis de precio para {ticker}: {e}")
 
-    return "\n\n".join(parts)
+    return DiagnosticsResult(
+        context_text="\n\n".join(parts),
+        tech_diag=tech_diag,
+        price_diag=price_diag,
+    )
+
+
+async def compute_deterministic_context(
+    ticker: str,
+    fd: FundamentalData,
+    market: str | None = None,
+) -> str:
+    """
+    Wrapper de conveniencia: devuelve solo el texto formateado.
+    Ahorra tokens porque la IA no tiene que calcular esto ella misma.
+    """
+    result = await compute_diagnostics(ticker, fd, market)
+    return result.context_text
 
 
 def build_signal_justification(

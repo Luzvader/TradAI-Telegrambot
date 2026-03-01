@@ -6,7 +6,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from config.markets import DEFAULT_TICKER_MARKET, market_display, normalize_ticker, split_yfinance_suffix
+from config.markets import (
+    DEFAULT_TICKER_MARKET, MARKET_CURRENCY, market_display,
+    normalize_ticker, split_yfinance_suffix, format_price, get_currency_symbol,
+)
+from config.settings import ACCOUNT_CURRENCY
 from data.dividends import check_and_record_dividends, get_dividend_summary
 from data.earnings import check_upcoming_earnings
 from database import repository as repo
@@ -32,11 +36,13 @@ async def cmd_cartera(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     summary = await get_portfolio_summary(real.id)
 
     # ── Cabecera ──
+    acct_ccy = summary.get("account_currency", ACCOUNT_CURRENCY)
+    acct_sym = get_currency_symbol(acct_ccy)
     text = f"📊 *MI CARTERA — Estrategia {strategy_str}*\n\n"
     text += (
-        f"💰 Valor: {summary['total_value']:,.2f}$\n"
-        f"💵 Invertido: {summary['total_invested']:,.2f}$\n"
-        f"📈 PnL: {summary['total_pnl']:+,.2f}$ ({summary['total_pnl_pct']:+.2f}%)\n\n"
+        f"💰 Valor: {format_price(summary['total_value'], acct_ccy)}\n"
+        f"💵 Invertido: {format_price(summary['total_invested'], acct_ccy)}\n"
+        f"📈 PnL: {summary['total_pnl']:+,.2f}{acct_sym} ({summary['total_pnl_pct']:+.2f}%)\n\n"
     )
 
     # ── Posiciones ──
@@ -50,10 +56,12 @@ async def cmd_cartera(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             elif p.get("take_profit_hit"):
                 alert = " 🎯 TP!"
             mkt = market_display(p['market'])
+            pos_ccy = p.get("currency", MARKET_CURRENCY.get(p["market"], "USD"))
+            pos_sym = get_currency_symbol(pos_ccy)
             text += (
                 f"{emoji} *{_escape_md(p['ticker'])}* ({_escape_md(mkt)})\n"
-                f"   {p['shares']:.2f} acc × {p['current_price']:.2f}$ "
-                f"| PnL: {p['pnl']:+.2f}$ ({p['pnl_pct']:+.1f}%) "
+                f"   {p['shares']:.2f} acc × {format_price(p['current_price'], pos_ccy)} "
+                f"| PnL: {p['pnl']:+.2f}{pos_sym} ({p['pnl_pct']:+.1f}%) "
                 f"| Peso: {p['weight_pct']:.1f}%{alert}\n"
             )
     else:
@@ -78,7 +86,12 @@ async def cmd_cartera(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 else "🔴" if sig.signal_type.value == "SELL"
                 else "🟡"
             )
-            price_str = f" | {sig.price:.2f}$" if sig.price else ""
+            if sig.price:
+                sig_mkt = getattr(sig, "market", None) or "NASDAQ"
+                sig_ccy = MARKET_CURRENCY.get(sig_mkt, "USD")
+                price_str = f" | {format_price(sig.price, sig_ccy)}"
+            else:
+                price_str = ""
             text += (
                 f"  {emoji} {_escape_md(sig.ticker)} → {sig.signal_type.value}{price_str}"
                 f" | {sig.created_at.strftime('%d/%m %H:%M')}\n"
@@ -166,6 +179,7 @@ async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     total = parsed["shares"] * parsed["price"]
     mkt_display = _escape_md(market_display(market))
+    buy_ccy = MARKET_CURRENCY.get(market, "USD")
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
@@ -180,8 +194,8 @@ async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"🛒 *¿Confirmar compra?*\n\n"
         f"📌 Ticker: {_escape_md(ticker)} ({mkt_display})\n"
         f"📊 Acciones: {parsed['shares']}\n"
-        f"💵 Precio: {parsed['price']}$\n"
-        f"💰 Total: {total:,.2f}$"
+        f"💵 Precio: {format_price(parsed['price'], buy_ccy)}\n"
+        f"💰 Total: {format_price(total, buy_ccy)}"
     )
     try:
         await update.message.reply_text(
@@ -228,6 +242,7 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     total = parsed["shares"] * parsed["price"]
     mkt_display = _escape_md(market_display(market))
+    sell_ccy = MARKET_CURRENCY.get(market, "USD")
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
@@ -242,8 +257,8 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"💸 *¿Confirmar venta?*\n\n"
         f"📌 Ticker: {_escape_md(ticker)} ({mkt_display})\n"
         f"📊 Acciones: {parsed['shares']}\n"
-        f"💵 Precio: {parsed['price']}$\n"
-        f"💰 Total: {total:,.2f}$"
+        f"💵 Precio: {format_price(parsed['price'], sell_ccy)}\n"
+        f"💰 Total: {format_price(total, sell_ccy)}"
     )
     try:
         await update.message.reply_text(
@@ -311,10 +326,11 @@ async def cmd_capital(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
 
         await repo.set_initial_capital(portfolio.id, amount)
+        acct_sym = get_currency_symbol(ACCOUNT_CURRENCY)
         await update.message.reply_text(
             f"✅ *Capital establecido manualmente*\n\n"
-            f"💰 Capital inicial: {amount:,.2f}$\n"
-            f"💵 Cash disponible: {amount:,.2f}$\n\n"
+            f"💰 Capital inicial: {amount:,.2f}{acct_sym}\n"
+            f"💵 Cash disponible: {amount:,.2f}{acct_sym}\n\n"
             f"_Usa_ `/capital sync` _para obtenerlo de Trading212._",
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -344,10 +360,11 @@ async def cmd_capital(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 text += f"  🏷 Capital inicial BD: {portfolio.initial_capital or 0:,.2f}\n"
             text += "\n"
         elif portfolio:
+            fb_sym = get_currency_symbol(ACCOUNT_CURRENCY)
             text += (
                 f"*{label}* _(T212 no disponible)_\n"
-                f"  Capital inicial: {portfolio.initial_capital or 0:,.2f}$\n"
-                f"  Cash disponible: {portfolio.cash or 0:,.2f}$\n\n"
+                f"  Capital inicial: {portfolio.initial_capital or 0:,.2f}{fb_sym}\n"
+                f"  Cash disponible: {portfolio.cash or 0:,.2f}{fb_sym}\n\n"
             )
         else:
             text += f"*{label}*: _No configurado_\n\n"
@@ -380,9 +397,10 @@ async def cmd_dividendos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 return
             lines = ["✅ *Dividendos registrados:*\n"]
             for d in new_divs:
+                d_sym = get_currency_symbol(ACCOUNT_CURRENCY)
                 lines.append(
-                    f"• {d['ticker']}: ${d['amount_per_share']:.4f}/acc "
-                    f"× {d['shares']:.0f} = *${d['total']:.2f}* "
+                    f"• {d['ticker']}: {d['amount_per_share']:.4f}{d_sym}/acc "
+                    f"× {d['shares']:.0f} = *{d['total']:.2f}{d_sym}* "
                     f"(ex-date: {d['ex_date']})"
                 )
             await _send_long(update, "\n".join(lines))
@@ -408,22 +426,23 @@ async def cmd_dividendos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
         return
 
+    div_sym = get_currency_symbol(ACCOUNT_CURRENCY)
     text = (
         f"📊 *DIVIDENDOS*\n\n"
-        f"💰 Total histórico: *${summary['total_all_time']:,.2f}*\n"
-        f"📅 Últimos 12 meses: *${summary['total_12m']:,.2f}*\n"
+        f"💰 Total histórico: *{summary['total_all_time']:,.2f}{div_sym}*\n"
+        f"📅 Últimos 12 meses: *{summary['total_12m']:,.2f}{div_sym}*\n"
         f"🔢 Pagos registrados: {summary['count']}\n\n"
     )
 
     if summary["by_ticker"]:
         text += "*Por ticker:*\n"
         for ticker, amount in list(summary["by_ticker"].items())[:10]:
-            text += f"  • {ticker}: ${amount:,.2f}\n"
+            text += f"  • {ticker}: {amount:,.2f}{div_sym}\n"
 
     if summary["recent"]:
         text += "\n*Últimos pagos:*\n"
         for d in summary["recent"][:5]:
-            text += f"  • {d['ticker']}: ${d['amount']:.2f} ({d['date']})\n"
+            text += f"  • {d['ticker']}: {d['amount']:.2f}{div_sym} ({d['date']})\n"
 
     await _send_long(update, text)
 

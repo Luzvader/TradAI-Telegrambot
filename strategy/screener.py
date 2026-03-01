@@ -50,6 +50,7 @@ async def screen_universe(
                 fd = await asyncio.to_thread(fetch_fundamentals, t, m)
                 vs = await asyncio.to_thread(analyzer, fd)
                 vs.market = m  # Propagar mercado de origen
+                vs.fundamentals = fd  # Cachear para evitar doble fetch en scanner
             return vs if vs.overall_score >= min_score else None
         except Exception as e:
             logger.warning(f"Error analizando {t}: {e}")

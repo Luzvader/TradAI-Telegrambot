@@ -7,19 +7,17 @@ import logging
 from typing import Any
 
 from ai.analyst import analyze_with_context
-from config.markets import DEFAULT_TICKER_MARKET, normalize_ticker
+from config.markets import DEFAULT_TICKER_MARKET, normalize_ticker, MARKET_CURRENCY
 from data.fundamentals import fetch_fundamentals
 from data.market_data import get_current_price
-from data.technical import get_technical_analysis
 from database import repository as repo
 from database.models import PortfolioType, SignalType, StrategyType
-from strategy import technical_analyst, price_analyst
 from strategy.screener import screen_universe
 from strategy.selector import get_strategy_analyzer
 
 from config.settings import SCAN_MIN_SCORE
 from config.settings import TRADING212_ANALYSIS_ORIENTED
-from signals.builders import compute_deterministic_context, build_signal_justification
+from signals.builders import compute_diagnostics, build_signal_justification
 
 logger = logging.getLogger(__name__)
 
@@ -44,15 +42,23 @@ async def scan_opportunities(
             portfolio.strategy if portfolio and portfolio.strategy else StrategyType.VALUE
         )
 
+    # Sobre-pedir resultados para compensar filtrado por tradabilidad / dedup
+    fetch_count = max_results * 3
+
     top_scores = await screen_universe(
         markets=markets,
         min_score=min_score,
-        max_results=max_results,
+        max_results=fetch_count,
         strategy=strategy,
     )
 
     opportunities: list[dict[str, Any]] = []
-    for idx, vs in enumerate(top_scores):
+    ai_count = 0  # Contador real de oportunidades con análisis IA
+
+    for vs in top_scores:
+        if len(opportunities) >= max_results:
+            break
+
         detected_market = vs.market or DEFAULT_TICKER_MARKET.get(normalize_ticker(vs.ticker), "NASDAQ")
 
         broker_tradability: dict[str, Any] = {}
@@ -79,33 +85,31 @@ async def scan_opportunities(
 
         ticker_price = await get_current_price(vs.ticker, detected_market)
 
-        # Obtener fundamentales para justificación
-        fd = None
+        # Reutilizar FundamentalData cacheado del screening (BUG1 fix)
+        fd = vs.fundamentals
         det_context = ""
         tech_diag = None
         price_diag_obj = None
-        try:
-            fd = await asyncio.to_thread(fetch_fundamentals, vs.ticker, detected_market)
-            if fd is not None:
-                det_context = await compute_deterministic_context(vs.ticker, fd, detected_market)
-                try:
-                    ti = await get_technical_analysis(vs.ticker, detected_market)
-                    if ti is not None:
-                        tech_diag = technical_analyst.diagnose(
-                            ti, fd.current_price, fd.high_52w, fd.low_52w, fd.avg_50d, fd.avg_200d,
-                        )
-                except Exception as e:
-                    logger.debug(f"Error en análisis técnico de {vs.ticker}: {e}")
-                try:
-                    price_diag_obj = price_analyst.diagnose(fd)
-                except Exception as e:
-                    logger.debug(f"Error en diagnóstico de precio de {vs.ticker}: {e}")
-        except Exception as e:
-            logger.debug(f"Error obteniendo datos de {vs.ticker}: {e}")
+
+        if fd is None:
+            # Fallback: fetch solo si no estaba cacheado
+            try:
+                fd = await asyncio.to_thread(fetch_fundamentals, vs.ticker, detected_market)
+            except Exception as e:
+                logger.debug(f"Error obteniendo fundamentales de {vs.ticker}: {e}")
+
+        if fd is not None:
+            try:
+                diag = await compute_diagnostics(vs.ticker, fd, detected_market)
+                det_context = diag.context_text
+                tech_diag = diag.tech_diag
+                price_diag_obj = diag.price_diag
+            except Exception as e:
+                logger.debug(f"Error en diagnósticos de {vs.ticker}: {e}")
 
         # Análisis IA solo para las 2 mejores oportunidades BUY (ahorro de tokens)
         ai_summary = None
-        if vs.signal == "BUY" and idx < 2:
+        if vs.signal == "BUY" and ai_count < 2:
             try:
                 fund_dict = {}
                 if fd:
@@ -123,6 +127,7 @@ async def scan_opportunities(
                     deterministic_context=det_context,
                 )
                 ai_summary = ai_text
+                ai_count += 1
             except Exception as e:
                 logger.warning(f"Error en análisis IA para oportunidad {vs.ticker}: {e}")
 
@@ -141,11 +146,19 @@ async def scan_opportunities(
             ai_analysis=ai_summary,
         )
 
+        # Moneda del activo
+        currency = "USD"
+        if fd and fd.currency:
+            currency = fd.currency
+        else:
+            currency = MARKET_CURRENCY.get(detected_market, "USD")
+
         opportunities.append({
             "signal_id": sig.id,
             "ticker": vs.ticker,
             "signal": vs.signal,
             "price": ticker_price,
+            "currency": currency,
             "overall_score": vs.overall_score,
             "value_score": vs.value_score,
             "quality_score": vs.quality_score,

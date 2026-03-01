@@ -18,6 +18,7 @@ class FundamentalData:
     sector: str = "N/A"
     industry: str = "N/A"
     market_cap: float | None = None
+    currency: str = "USD"
     current_price: float | None = None
 
     # Ratios de valoración
@@ -82,6 +83,7 @@ def fetch_fundamentals(ticker: str, market: str | None = None) -> FundamentalDat
         sector=info.get("sector", "N/A"),
         industry=info.get("industry", "N/A"),
         market_cap=info.get("market_cap"),
+        currency=info.get("currency", "USD"),
         current_price=info.get("current_price"),
         pe_ratio=info.get("pe_ratio"),
         forward_pe=info.get("forward_pe"),

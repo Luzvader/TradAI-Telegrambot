@@ -97,6 +97,75 @@ MARKETS: dict[str, MarketSchedule] = {
     ),
 }
 
+# Moneda por defecto de cada mercado
+MARKET_CURRENCY: dict[str, str] = {
+    "NASDAQ": "USD",
+    "NYSE": "USD",
+    "IBEX": "EUR",
+    "LSE": "GBp",  # London cotiza en peniques (GBp)
+    "XETRA": "EUR",
+    "EURONEXT_PARIS": "EUR",
+    "BORSA_ITALIANA": "EUR",
+    "EURONEXT_AMSTERDAM": "EUR",
+    "OMX_COPENHAGEN": "DKK",
+    "OMX_STOCKHOLM": "SEK",
+    "OMX_HELSINKI": "EUR",
+    "OSLO_BORS": "NOK",
+    "SIX_SWISS": "CHF",
+    "WIENER_BORSE": "EUR",
+    "EURONEXT_BRUSSELS": "EUR",
+    "EURONEXT_LISBON": "EUR",
+    "ISE_DUBLIN": "EUR",
+    "WSE_WARSAW": "PLN",
+    "TSX_TORONTO": "CAD",
+    "ASX_AUSTRALIA": "AUD",
+    "HKEX": "HKD",
+    "TSE_TOKYO": "JPY",
+}
+
+# Símbolo de moneda para display
+CURRENCY_SYMBOL: dict[str, str] = {
+    "USD": "$",
+    "EUR": "€",
+    "GBP": "£",
+    "GBp": "p",  # Peniques británicos
+    "CHF": "CHF",
+    "DKK": "DKK",
+    "SEK": "SEK",
+    "NOK": "NOK",
+    "PLN": "PLN",
+    "CAD": "CA$",
+    "AUD": "A$",
+    "HKD": "HK$",
+    "JPY": "¥",
+}
+
+
+def get_currency_symbol(currency: str | None) -> str:
+    """Devuelve el símbolo de moneda para display."""
+    if not currency:
+        return "$"
+    return CURRENCY_SYMBOL.get(currency, currency)
+
+
+def format_price(price: float | None, currency: str | None = None) -> str:
+    """Formatea un precio con su símbolo de moneda.
+
+    Para GBp (peniques) no muestra decimales.
+    Para JPY no muestra decimales.
+    Para el resto, 2 decimales.
+    """
+    if price is None:
+        return "N/D"
+    sym = get_currency_symbol(currency)
+    if currency in ("GBp", "JPY"):
+        return f"{price:.0f}{sym}"
+    # Símbolo al final para EUR y monedas europeas, al inicio para USD/etc.
+    if currency in ("EUR",):
+        return f"{price:.2f}{sym}"
+    return f"{price:.2f}{sym}"
+
+
 # Nombres cortos para mostrar en UI (Telegram, web, etc.)
 MARKET_DISPLAY_NAME: dict[str, str] = {
     "NASDAQ": "NASDAQ",

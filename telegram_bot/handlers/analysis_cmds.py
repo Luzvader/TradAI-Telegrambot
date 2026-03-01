@@ -9,6 +9,8 @@ from telegram.ext import ContextTypes
 
 from ai.analyst import analyze_with_context, get_macro_analysis
 from backtesting.engine import BacktestConfig, run_backtest
+from config.markets import format_price, MARKET_CURRENCY
+from config.settings import SCAN_MIN_SCORE
 from data.insiders import get_insider_activity, format_insider_report
 from data.ticker_discovery import get_etf_tickers, get_etf_categories
 from database import repository as repo
@@ -99,7 +101,8 @@ async def cmd_analizar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     strategy = str(analysis.get("strategy", "value")).upper()
     market_str = f" ({resolved_market})" if resolved_market else ""
     price = analysis.get("price")
-    price_str = f"{price:.2f}$" if price else "N/A"
+    currency = analysis.get("currency", "USD")
+    price_str = format_price(price, currency) if price else "N/A"
 
     text = f"{emoji} *${resolved_ticker}*{market_str} — {price_str}\n"
     text += f"Señal: *{signal}* | Score: *{analysis.get('overall_score', 0):.0f}*/100\n"
@@ -168,14 +171,15 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     opportunities = await scan_opportunities(max_results=5)
 
     if not opportunities:
-        await update.message.reply_text("Sin oportunidades con score > 65.")
+        await update.message.reply_text(f"Sin oportunidades con score > {SCAN_MIN_SCORE:.0f}.")
         return
 
     strat = str(opportunities[0].get("strategy", "value")).upper()
     text = f"🎯 *TOP OPORTUNIDADES {strat}*\n\n"
     for i, opp in enumerate(opportunities, 1):
         emoji = "🟢" if opp["signal"] == "BUY" else "🟡"
-        price_str = f"{opp['price']:.2f}$" if opp.get("price") else "N/A"
+        currency = opp.get("currency", "USD")
+        price_str = format_price(opp.get("price"), currency) if opp.get("price") else "N/A"
         text += (
             f"{i}. {emoji} *${opp['ticker']}* — {price_str}\n"
             f"   Score: {opp['overall_score']:.0f}/100 "
@@ -304,7 +308,7 @@ async def cmd_historial(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             else "🔴" if sig.signal_type.value == "SELL"
             else "🟡"
         )
-        price_str = f" | {sig.price:.2f}$" if sig.price else ""
+        price_str = f" | {format_price(sig.price, MARKET_CURRENCY.get(sig.market, 'USD'))}" if sig.price else ""
         score_str = f" | Score: {sig.value_score:.0f}" if sig.value_score else ""
         text += (
             f"{emoji} *${sig.ticker}* → {sig.signal_type.value}{price_str}{score_str}\n"
@@ -347,10 +351,11 @@ async def cmd_comparar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     def _fmt(a: dict) -> str:
         emoji = "🟢" if a["signal"] == "BUY" else "🔴" if a["signal"] == "SELL" else "🟡"
+        cur = a.get("currency", "USD")
         lines = [
             f"*${a['ticker']}* — {a.get('name', 'N/A')}",
             f"  Sector: {a.get('sector', 'N/A')}",
-            f"  Precio: {a.get('price', 'N/A')}$",
+            f"  Precio: {format_price(a.get('price'), cur)}",
             f"  {emoji} Señal: {a['signal']}",
             f"  Score: {a['overall_score']:.0f}/100 (V:{a['value_score']:.0f} Q:{a['quality_score']:.0f} S:{a['safety_score']:.0f})",
         ]
@@ -505,7 +510,7 @@ async def cmd_etf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         lines = [f"📊 *ETFs — {label.upper()}*\n"]
         for r in top:
             emoji = "🟢" if r["signal"] == "BUY" else "🔴" if r["signal"] == "SELL" else "🟡"
-            price_str = f"${r['price']:.2f}" if r["price"] else "N/A"
+            price_str = f"${r['price']:.2f}" if r["price"] else "N/A"  # ETFs son siempre USD
             lines.append(
                 f"{emoji} *{r['ticker']}* — Score: {r['score']:.0f} | "
                 f"{price_str} | {r['signal']}"

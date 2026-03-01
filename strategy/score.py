@@ -6,7 +6,8 @@ resto del sistema (signals, screener, watchlist, Telegram) sea agnóstico.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from config.settings import SIGNAL_BUY_THRESHOLD, SIGNAL_SELL_THRESHOLD
 
@@ -27,6 +28,9 @@ class StrategyScore:
     margin_of_safety: float | None
     reasoning: list[str]
     market: str | None = None  # Mercado de origen (IBEX, LSE, etc.)
+
+    # FundamentalData cacheado durante screening (evita doble fetch)
+    fundamentals: Any = field(default=None, repr=False)
 
     @property
     def signal(self) -> str:

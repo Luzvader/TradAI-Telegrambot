@@ -12,7 +12,7 @@ import asyncio
 import logging
 from typing import Any
 
-from config.markets import DEFAULT_TICKER_MARKET, normalize_ticker, split_yfinance_suffix
+from config.markets import DEFAULT_TICKER_MARKET, normalize_ticker, split_yfinance_suffix, MARKET_CURRENCY
 from config.settings import TRADING212_ANALYSIS_ORIENTED
 from data.fundamentals import fetch_fundamentals
 from data.technical import get_technical_analysis
@@ -21,7 +21,7 @@ from database.models import PortfolioType, StrategyType
 from strategy import technical_analyst, price_analyst
 from strategy.selector import get_strategy_analyzer
 
-from signals.builders import compute_deterministic_context  # noqa: F401
+from signals.builders import compute_deterministic_context, compute_diagnostics  # noqa: F401
 from signals.portfolio_signals import generate_signals_for_portfolio  # noqa: F401
 from signals.scanner import scan_opportunities  # noqa: F401
 
@@ -93,6 +93,7 @@ async def analyze_ticker(
     return {
         "ticker": ticker.upper(),
         "market": resolved_market,
+        "currency": fd.currency or MARKET_CURRENCY.get(resolved_market, "USD"),
         "name": fd.name,
         "sector": fd.sector,
         "price": fd.current_price,
