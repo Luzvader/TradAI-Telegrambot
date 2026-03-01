@@ -1,10 +1,10 @@
 """
-"""Watchlist IA – genera y mantiene una watchlist de hasta 25 posiciones
+Watchlist IA - genera y mantiene una watchlist de hasta 25 posiciones
 (acciones + ETFs) fuera de la cartera que merecen estudio.
 
 La watchlist se compone de:
-  • Hasta 20 acciones seleccionadas por la IA.
-  • Hasta 5 ETFs complementarios alineados con la estrategia activa.
+  - Hasta 20 acciones seleccionadas por la IA.
+  - Hasta 5 ETFs complementarios alineados con la estrategia activa.
 """
 
 import asyncio
