@@ -324,9 +324,10 @@ def _get_category_regions(category: str) -> list[str]:
 def _is_non_equity_category(category: str) -> bool:
     """Devuelve True si la categoría no es renta variable."""
     non_equity = {
-        "bonds_aggregate", "bonds_short", "bonds_long",
-        "bonds_corporate", "bonds_high_yield", "bonds_tips",
-        "bonds_intl", "gold", "silver", "commodities_broad",
+        "bonds_aggregate", "bonds_short", "bonds_intermediate",
+        "bonds_long", "bonds_corporate", "bonds_high_yield",
+        "bonds_tips", "bonds_intl", "multi_asset",
+        "gold", "silver", "commodities_broad",
     }
     return category in non_equity
 

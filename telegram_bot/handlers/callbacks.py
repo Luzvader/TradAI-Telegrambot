@@ -240,6 +240,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             market=market,
             price=price,
             shares=shares,
+            origin=OperationOrigin.SAFE,
         )
 
         if result["success"]:
