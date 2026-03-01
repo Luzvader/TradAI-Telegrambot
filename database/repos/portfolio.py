@@ -277,6 +277,18 @@ async def set_initial_capital(portfolio_id: int, capital: float) -> None:
         await session.commit()
 
 
+async def set_initial_capital_only(portfolio_id: int, capital: float) -> None:
+    """Establece solo el capital inicial, sin modificar cash."""
+    async with async_session_factory() as session:
+        stmt = (
+            update(Portfolio)
+            .where(Portfolio.id == portfolio_id)
+            .values(initial_capital=capital)
+        )
+        await session.execute(stmt)
+        await session.commit()
+
+
 async def adjust_cash(portfolio_id: int, delta: float) -> float:
     """Ajusta el cash (positivo = entrada, negativo = salida). Devuelve nuevo cash."""
     async with async_session_factory() as session:

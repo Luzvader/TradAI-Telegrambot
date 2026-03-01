@@ -558,12 +558,12 @@ async def job_sync_broker() -> None:
     """
     Sincronización periódica con Trading212:
     1. Refresca precios de posiciones del broker
-    2. Sincroniza cash real del broker con BD local
+    2. Sincroniza cash de AMBAS cuentas (live→REAL, demo→BACKTEST)
     3. Detecta discrepancias entre broker y BD que puedan indicar
        operaciones manuales fuera de TradAI
     """
     from broker.bridge import (
-        sync_cash_from_broker,
+        sync_all_capitals,
         sync_broker_positions,
     )
     from data.market_data import refresh_broker_prices
@@ -576,15 +576,16 @@ async def job_sync_broker() -> None:
         # 1. Refrescar precios
         await refresh_broker_prices()
 
-        # 2. Sync cash
-        cash_result = await sync_cash_from_broker(real.id)
-        if cash_result.get("success") and abs(cash_result.get("diff", 0)) > 5.0:
-            logger.info(
-                f"🔄 Broker sync — Cash: {cash_result['old_cash']:.2f} → "
-                f"{cash_result['new_cash']:.2f} ({cash_result['diff']:+.2f})"
-            )
+        # 2. Sync cash de ambas cuentas T212
+        cap_results = await sync_all_capitals()
+        for mode, r in cap_results.items():
+            if r.get("success") and abs(r.get("diff", 0)) > 5.0:
+                logger.info(
+                    f"🔄 Broker sync [{mode}] — Cash: {r['old_cash']:.2f} → "
+                    f"{r['new_cash']:.2f} ({r['diff']:+.2f})"
+                )
 
-        # 3. Detectar discrepancias
+        # 3. Detectar discrepancias (solo para cartera real)
         sync_result = await sync_broker_positions(real.id)
         if sync_result.get("success"):
             only_broker = sync_result.get("only_broker", [])

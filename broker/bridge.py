@@ -534,12 +534,13 @@ async def get_broker_prices() -> dict[str, float]:
         return {}
 
 
-async def get_broker_account_cash() -> dict[str, Any] | None:
+async def get_broker_account_cash(mode: str | None = None) -> dict[str, Any] | None:
     """
     Obtiene información de la cuenta del broker.
-    Devuelve {cash, invested, portfolio_value, pnl, currency} o None.
+    Devuelve {cash, invested, portfolio_value, pnl, currency, mode} o None.
+    Si mode=None usa el modo por defecto.
     """
-    client = get_trading212_client()
+    client = get_trading212_client(mode)
     if client is None:
         return None
     try:
@@ -553,20 +554,24 @@ async def get_broker_account_cash() -> dict[str, Any] | None:
                 "pnl": acc.pnl,
                 "pnl_pct": acc.pnl_pct,
                 "currency": acc.currency,
+                "mode": acc.mode,
             }
     except Exception as e:
-        logger.debug(f"Error obteniendo cuenta del broker: {e}")
+        logger.debug(f"Error obteniendo cuenta del broker ({mode}): {e}")
     return None
 
 
-async def sync_cash_from_broker(portfolio_id: int) -> dict[str, Any]:
+async def sync_cash_from_broker(
+    portfolio_id: int, mode: str | None = None,
+) -> dict[str, Any]:
     """
     Sincroniza el cash del portfolio local con el cash real del broker.
     Devuelve {success, old_cash, new_cash, diff}.
+    Si mode=None usa el modo por defecto.
     """
-    client = get_trading212_client()
+    client = get_trading212_client(mode)
     if client is None:
-        return {"success": False, "error": "Broker no configurado"}
+        return {"success": False, "error": f"Broker no configurado (modo {mode})"}
 
     from database import repository as repo
 
@@ -576,6 +581,7 @@ async def sync_cash_from_broker(portfolio_id: int) -> dict[str, Any]:
             return {"success": False, "error": result.error}
 
         broker_cash = result.data.cash
+        broker_total = result.data.portfolio_value
         portfolio = await repo.get_portfolio(portfolio_id)
         if portfolio is None:
             return {"success": False, "error": "Portfolio no encontrado"}
@@ -586,8 +592,18 @@ async def sync_cash_from_broker(portfolio_id: int) -> dict[str, Any]:
         if abs(diff) > 0.01:
             await repo.set_cash(portfolio_id, broker_cash)
             logger.info(
-                f"💰 Cash sincronizado: {old_cash:.2f} → {broker_cash:.2f} "
+                f"💰 Cash sincronizado [{client.mode}]: {old_cash:.2f} → {broker_cash:.2f} "
                 f"(diff: {diff:+.2f})"
+            )
+
+        # Sincronizar initial_capital con el totalValue del broker
+        # si aún no se ha establecido manualmente
+        old_capital = portfolio.initial_capital or 0
+        if old_capital == 0 and broker_total > 0:
+            await repo.set_initial_capital_only(portfolio_id, broker_total)
+            logger.info(
+                f"💰 Capital inicial [{client.mode}]: establecido a {broker_total:.2f} "
+                f"(portfolio_value del broker)"
             )
 
         return {
@@ -596,10 +612,52 @@ async def sync_cash_from_broker(portfolio_id: int) -> dict[str, Any]:
             "new_cash": round(broker_cash, 2),
             "diff": round(diff, 2),
             "currency": result.data.currency,
+            "broker_total": round(broker_total, 2),
+            "mode": client.mode,
         }
     except Exception as e:
-        logger.error(f"Error sincronizando cash: {e}")
+        logger.error(f"Error sincronizando cash [{mode}]: {e}")
         return {"success": False, "error": str(e)}
+
+
+async def sync_all_capitals() -> dict[str, Any]:
+    """
+    Sincroniza el capital desde Trading212 para ambas carteras:
+      REAL  ← T212 live
+      BACKTEST ← T212 demo
+    Devuelve resumen de la sincronización.
+    """
+    from database import repository as repo
+    from database.models import PortfolioType
+    from broker.trading212 import get_available_modes
+
+    results: dict[str, Any] = {}
+    mode_portfolio_map = {
+        "live": PortfolioType.REAL,
+        "demo": PortfolioType.BACKTEST,
+    }
+
+    available = get_available_modes()
+
+    for mode, ptype in mode_portfolio_map.items():
+        if mode not in available:
+            results[mode] = {"skipped": True, "reason": f"Cliente {mode} no inicializado"}
+            continue
+
+        portfolio = await repo.get_portfolio_by_type(ptype)
+        if portfolio is None:
+            results[mode] = {"skipped": True, "reason": f"Portfolio {ptype.value} no existe"}
+            continue
+
+        r = await sync_cash_from_broker(portfolio.id, mode=mode)
+        results[mode] = r
+        if r.get("success"):
+            logger.info(
+                f"💰 Capital sync [{mode}→{ptype.value}]: "
+                f"cash={r['new_cash']:.2f}, total={r.get('broker_total', 0):.2f}"
+            )
+
+    return results
 
 
 async def get_broker_dividend_history(limit: int = 50) -> list[dict[str, Any]]:

@@ -75,10 +75,30 @@ async def main() -> None:
     # 2b. Inicializar broker Trading212
     from config.settings import TRADING212_API_KEY, TRADING212_API_SECRET, TRADING212_MODE
     if TRADING212_API_KEY and TRADING212_API_SECRET:
-        from broker.trading212 import init_trading212
+        from broker.trading212 import init_trading212_dual
         try:
-            init_trading212(TRADING212_API_KEY, TRADING212_API_SECRET, TRADING212_MODE)
-            logger.info(f"🏦 Trading212 broker inicializado (modo {TRADING212_MODE.upper()})")
+            clients = init_trading212_dual(
+                TRADING212_API_KEY, TRADING212_API_SECRET, TRADING212_MODE,
+            )
+            modes = ", ".join(m.upper() for m in clients)
+            logger.info(f"🏦 Trading212 broker inicializado ({modes})")
+
+            # Sincronizar capital desde T212 (REAL←live, BACKTEST←demo)
+            from broker.bridge import sync_all_capitals
+            try:
+                cap_results = await sync_all_capitals()
+                for mode, r in cap_results.items():
+                    if r.get("success"):
+                        logger.info(
+                            f"   💰 {mode.upper()}: cash={r['new_cash']:.2f}, "
+                            f"total={r.get('broker_total', 0):.2f} {r.get('currency', '')}"
+                        )
+                    elif r.get("skipped"):
+                        logger.debug(f"   ⏭️ {mode.upper()}: {r.get('reason')}")
+                    else:
+                        logger.warning(f"   ⚠️ {mode.upper()}: {r.get('error')}")
+            except Exception as e:
+                logger.warning(f"⚠️ Error sincronizando capital desde T212: {e}")
         except Exception as e:
             logger.warning(f"⚠️ Error inicializando Trading212: {e}")
     else:

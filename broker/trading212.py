@@ -890,34 +890,63 @@ class Trading212Client(BaseBroker):
         )
 
 
-# ── Singleton global ─────────────────────────────────────────
+# ── Singleton global (soporta dual: demo + live) ────────────
 
-_client: Trading212Client | None = None
+_clients: dict[str, Trading212Client] = {}
+_default_mode: str = "demo"
 
 
-def get_trading212_client() -> Trading212Client | None:
-    """Devuelve el cliente singleton de Trading212 (None si no configurado)."""
-    return _client
+def get_trading212_client(mode: str | None = None) -> Trading212Client | None:
+    """
+    Devuelve el cliente Trading212 para el modo dado.
+    Si mode=None, usa el modo por defecto (TRADING212_MODE).
+    """
+    m = (mode or _default_mode).lower()
+    return _clients.get(m)
+
+
+def get_available_modes() -> list[str]:
+    """Devuelve los modos con cliente inicializado ('demo', 'live', o ambos)."""
+    return list(_clients.keys())
 
 
 def init_trading212(
     api_key: str, api_secret: str, mode: str = "demo"
 ) -> Trading212Client:
-    """Inicializa el cliente global de Trading212."""
-    global _client
-    if _client is not None:
+    """Inicializa un cliente global de Trading212 para un modo concreto."""
+    global _default_mode
+    m = mode.lower()
+    old = _clients.get(m)
+    if old is not None:
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(_client.close())
+            loop.create_task(old.close())
         except RuntimeError:
             pass
-    _client = Trading212Client(api_key=api_key, api_secret=api_secret, mode=mode)
-    return _client
+    client = Trading212Client(api_key=api_key, api_secret=api_secret, mode=m)
+    _clients[m] = client
+    _default_mode = m
+    return client
+
+
+def init_trading212_dual(
+    api_key: str, api_secret: str, primary_mode: str = "demo",
+) -> dict[str, Trading212Client]:
+    """
+    Inicializa DOS clientes Trading212 (demo + live) con las mismas
+    credenciales.  ``primary_mode`` se usa como default cuando no se
+    especifica modo.
+    """
+    global _default_mode
+    _default_mode = primary_mode.lower()
+    for m in ("demo", "live"):
+        init_trading212(api_key, api_secret, m)
+    logger.info("🔗 Trading212 dual: demo + live inicializados")
+    return dict(_clients)
 
 
 async def shutdown_trading212() -> None:
-    """Cierra la conexión del cliente."""
-    global _client
-    if _client is not None:
-        await _client.close()
-        _client = None
+    """Cierra la conexión de todos los clientes."""
+    for m, client in list(_clients.items()):
+        await client.close()
+    _clients.clear()

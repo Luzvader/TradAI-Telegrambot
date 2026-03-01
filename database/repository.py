@@ -28,6 +28,7 @@ from database.repos.portfolio import (  # noqa: F401
     save_portfolio_snapshot,
     set_cash,
     set_initial_capital,
+    set_initial_capital_only,
     set_portfolio_strategy,
     update_portfolio_cash,
     update_position_price,

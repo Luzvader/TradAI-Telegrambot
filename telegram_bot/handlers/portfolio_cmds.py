@@ -260,45 +260,103 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_capital(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Comando /capital CANTIDAD — establece el capital inicial de la cartera.
-    Ejemplo: /capital 10000
+    Comando /capital — muestra capital real y demo obtenido de Trading212.
+    /capital sync — fuerza sincronización con T212.
+    /capital CANTIDAD — establece capital manualmente (fallback).
     """
     args = context.args or []
-    if not args:
-        portfolio = await repo.get_portfolio_by_type(PortfolioType.REAL)
-        if portfolio:
-            text = (
-                f"💰 *CAPITAL*\n\n"
-                f"Capital inicial: {portfolio.initial_capital or 0:,.2f}$\n"
-                f"Cash disponible: {portfolio.cash or 0:,.2f}$\n\n"
-                f"_Cambiar:_ `/capital CANTIDAD`\n"
-                f"_Ejemplo:_ `/capital 10000`"
-            )
-        else:
-            text = "❌ Cartera no inicializada."
+
+    # ── /capital sync — forzar sincronización T212 ──
+    if args and args[0].lower() == "sync":
+        await update.message.reply_text("🔄 Sincronizando capital con Trading212...")
+        from broker.bridge import sync_all_capitals
+        results = await sync_all_capitals()
+        text = "💰 *SINCRONIZACIÓN DE CAPITAL*\n\n"
+        mode_labels = {"live": "🟢 REAL (live)", "demo": "🔵 DEMO"}
+        for mode in ("live", "demo"):
+            r = results.get(mode, {})
+            label = mode_labels[mode]
+            if r.get("success"):
+                text += (
+                    f"{label}\n"
+                    f"  Cash: {r['new_cash']:,.2f} {r.get('currency', '$')}\n"
+                    f"  Total broker: {r.get('broker_total', 0):,.2f}\n"
+                )
+                if abs(r.get("diff", 0)) > 0.01:
+                    text += f"  Δ cash: {r['diff']:+,.2f}\n"
+                text += "\n"
+            elif r.get("skipped"):
+                text += f"{label}: _{r.get('reason')}_\n\n"
+            else:
+                text += f"{label}: ❌ {r.get('error', 'Error desconocido')}\n\n"
         await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
         return
 
-    try:
-        amount = float(args[0].replace(",", ""))
-        if amount <= 0:
-            raise ValueError
-    except ValueError:
-        await update.message.reply_text("❌ Indica una cantidad válida (número positivo).")
+    # ── /capital CANTIDAD — establecer manualmente (fallback) ──
+    if args:
+        try:
+            amount = float(args[0].replace(",", ""))
+            if amount <= 0:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Indica una cantidad válida o usa `/capital sync`.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
+        portfolio = await repo.get_portfolio_by_type(PortfolioType.REAL)
+        if portfolio is None:
+            await update.message.reply_text("❌ Cartera no inicializada.")
+            return
+
+        await repo.set_initial_capital(portfolio.id, amount)
+        await update.message.reply_text(
+            f"✅ *Capital establecido manualmente*\n\n"
+            f"💰 Capital inicial: {amount:,.2f}$\n"
+            f"💵 Cash disponible: {amount:,.2f}$\n\n"
+            f"_Usa_ `/capital sync` _para obtenerlo de Trading212._",
+            parse_mode=ParseMode.MARKDOWN,
+        )
         return
 
-    portfolio = await repo.get_portfolio_by_type(PortfolioType.REAL)
-    if portfolio is None:
-        await update.message.reply_text("❌ Cartera no inicializada.")
-        return
+    # ── /capital (sin args) — mostrar estado de ambas cuentas T212 ──
+    from broker.bridge import get_broker_account_cash
 
-    await repo.set_initial_capital(portfolio.id, amount)
-    await update.message.reply_text(
-        f"✅ *Capital establecido*\n\n"
-        f"💰 Capital inicial: {amount:,.2f}$\n"
-        f"💵 Cash disponible: {amount:,.2f}$",
-        parse_mode=ParseMode.MARKDOWN,
+    text = "💰 *CAPITAL*\n\n"
+    mode_labels = {"live": "🟢 REAL (live)", "demo": "🔵 DEMO"}
+    ptype_map = {"live": PortfolioType.REAL, "demo": PortfolioType.BACKTEST}
+
+    for mode in ("live", "demo"):
+        label = mode_labels[mode]
+        portfolio = await repo.get_portfolio_by_type(ptype_map[mode])
+        broker = await get_broker_account_cash(mode=mode)
+
+        if broker:
+            text += (
+                f"*{label}*\n"
+                f"  💵 Cash: {broker['cash']:,.2f} {broker.get('currency', '$')}\n"
+                f"  📊 Invertido: {broker['invested']:,.2f}\n"
+                f"  💰 Total: {broker['portfolio_value']:,.2f}\n"
+                f"  📈 PnL: {broker['pnl']:+,.2f} ({broker.get('pnl_pct', 0):+.1f}%)\n"
+            )
+            if portfolio:
+                text += f"  🏷 Capital inicial BD: {portfolio.initial_capital or 0:,.2f}\n"
+            text += "\n"
+        elif portfolio:
+            text += (
+                f"*{label}* _(T212 no disponible)_\n"
+                f"  Capital inicial: {portfolio.initial_capital or 0:,.2f}$\n"
+                f"  Cash disponible: {portfolio.cash or 0:,.2f}$\n\n"
+            )
+        else:
+            text += f"*{label}*: _No configurado_\n\n"
+
+    text += (
+        "_Sincronizar:_ `/capital sync`\n"
+        "_Establecer manualmente:_ `/capital CANTIDAD`"
     )
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 
 async def cmd_dividendos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
