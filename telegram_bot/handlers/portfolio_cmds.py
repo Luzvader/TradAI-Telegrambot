@@ -67,6 +67,16 @@ async def cmd_cartera(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     else:
         text += "_Sin posiciones abiertas_\n"
 
+    # ── Distribución Stock / ETF ──
+    etf_pct = summary.get("etf_pct", 0)
+    stock_pct = summary.get("stock_pct", 0)
+    if etf_pct > 0 or stock_pct > 0:
+        text += (
+            f"\n📦 *Stocks / ETFs:*\n"
+            f"  Stocks: {format_price(summary.get('stock_value', 0), acct_ccy)} ({stock_pct:.1f}%)\n"
+            f"  ETFs: {format_price(summary.get('etf_value', 0), acct_ccy)} ({etf_pct:.1f}%)\n"
+        )
+
     # ── Sectores ──
     if summary.get("sector_weights"):
         text += "\n*Sectores:*\n"
@@ -448,6 +458,86 @@ async def cmd_dividendos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await _send_long(update, text)
 
 
+async def cmd_etf_cartera(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    /etf_cartera — Estado de la asignación dinámica de ETFs en la cartera.
+    Muestra: ETFs actuales, % objetivo vs real, recomendaciones de compra.
+    """
+    real = await repo.get_portfolio_by_type(PortfolioType.REAL)
+    if real is None:
+        await update.message.reply_text("❌ No hay cartera inicializada.")
+        return
+
+    await update.message.reply_text("⏳ Analizando asignación ETF…")
+
+    try:
+        from strategy.etf_selector import get_etf_portfolio_status
+        status = await get_etf_portfolio_status(real.id)
+    except Exception as e:
+        logger.error(f"Error obteniendo estado ETF: {e}")
+        await update.message.reply_text(f"❌ Error: {e}")
+        return
+
+    strat = (real.strategy.value if real.strategy else "value").upper()
+    text = f"📊 *ETF ALLOCATION — {strat}*\n\n"
+
+    # ── Resumen general ──
+    current_pct = status.get("current_etf_pct", 0)
+    target_pct = status.get("target_etf_pct", 0)
+    gap = target_pct - current_pct
+    gap_emoji = "✅" if abs(gap) < 3 else ("⬆️" if gap > 0 else "⬇️")
+
+    acct_ccy = ACCOUNT_CURRENCY
+    acct_sym = get_currency_symbol(acct_ccy)
+
+    text += (
+        f"🎯 Objetivo ETF: *{target_pct:.1f}%*\n"
+        f"📍 Actual ETF: *{current_pct:.1f}%* {gap_emoji}\n"
+        f"📊 Gap: *{gap:+.1f}%*\n"
+        f"💰 Valor ETF: {status.get('etf_value', 0):,.2f}{acct_sym}\n"
+        f"💰 Valor Stocks: {status.get('stock_value', 0):,.2f}{acct_sym}\n\n"
+    )
+
+    # ── ETFs actuales en cartera ──
+    etf_positions = status.get("etf_positions", [])
+    if etf_positions:
+        text += "*ETFs en cartera:*\n"
+        for ep in etf_positions:
+            cat = ep.get("category", "?")
+            text += (
+                f"  • *{_escape_md(ep['ticker'])}* ({_escape_md(cat)})"
+                f" — {ep.get('value', 0):,.2f}{acct_sym}"
+                f" | {ep.get('weight_pct', 0):.1f}%\n"
+            )
+        text += "\n"
+    else:
+        text += "_Sin ETFs en cartera_\n\n"
+
+    # ── Recomendaciones ──
+    recommendations = status.get("recommendations", [])
+    if recommendations:
+        text += "*Recomendaciones:*\n"
+        for rec in recommendations[:5]:
+            text += (
+                f"  🔹 *{_escape_md(rec['ticker'])}* ({_escape_md(rec.get('category', ''))})\n"
+                f"     Score: {rec.get('score', 0):.0f} | "
+                f"Complementariedad: {rec.get('complementarity', 0):.0f}%\n"
+                f"     {_escape_md('; '.join(rec.get('reasoning') or []))}\n"
+            )
+        text += "\n"
+
+    # ── Categorías cubiertas ──
+    categories = status.get("category_coverage", {})
+    if categories:
+        text += "*Cobertura por categoría:*\n"
+        for cat, tickers in categories.items():
+            text += f"  {_escape_md(cat)}: {', '.join(tickers)}\n"
+
+    text += f"\n_Usa /etf para escanear ETFs disponibles_"
+
+    await _send_long(update, text)
+
+
 # ── Registro de comandos ─────────────────────────────────────
 
 COMMANDS: list[CommandInfo] = [
@@ -456,4 +546,5 @@ COMMANDS: list[CommandInfo] = [
     CommandInfo("sell", cmd_sell, "Vender: /sell TICKER CANTIDAD PRECIO"),
     CommandInfo("capital", cmd_capital, "Establecer capital: /capital 10000"),
     CommandInfo("dividendos", cmd_dividendos, "Dividendos: /dividendos [check]"),
+    CommandInfo("etf_cartera", cmd_etf_cartera, "Asignación ETF de la cartera"),
 ]

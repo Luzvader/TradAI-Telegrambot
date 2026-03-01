@@ -369,45 +369,48 @@ def invalidate_cache(market_key: str | None = None) -> None:
 
 # ── ETFs ─────────────────────────────────────────────────────
 
-# Universo de ETFs populares organizados por categoría
-ETF_UNIVERSE: dict[str, list[str]] = {
-    "indices_us": [
-        "SPY", "QQQ", "IWM", "DIA", "VOO", "VTI", "IVV",
-    ],
-    "indices_eu": [
-        "EZU", "FEZ", "VGK", "IEUR", "EWG", "EWQ", "EWP", "EWI", "EWU",
-    ],
-    "indices_global": [
-        "VT", "ACWI", "VXUS", "EFA", "EEM", "VWO",
-    ],
+# Mapeamos las categorías "legacy" a las categorías canónicas de etf_config.
+# El universo real vive en strategy/etf_config.py; aquí solo mantenemos la
+# interfaz pública usada por /etf y la watchlist IA.
+
+_LEGACY_CATEGORY_MAP: dict[str, list[str]] = {
+    "indices_us": ["core_us"],
+    "indices_eu": ["core_eu", "europe_country"],
+    "indices_global": ["core_global", "emerging"],
     "sectorial": [
-        "XLK", "XLF", "XLV", "XLE", "XLI", "XLC", "XLRE", "XLB", "XLP", "XLU", "XLY",
+        "tech", "healthcare", "financials", "energy", "consumer_staples",
+        "consumer_disc", "communication", "materials", "utilities",
+        "industrials", "real_estate",
     ],
     "renta_fija": [
-        "AGG", "BND", "TLT", "IEF", "SHY", "LQD", "HYG", "TIP",
+        "bonds_aggregate", "bonds_short", "bonds_intermediate",
+        "bonds_long", "bonds_corporate", "bonds_high_yield",
+        "bonds_tips", "bonds_intl",
     ],
-    "commodities": [
-        "GLD", "SLV", "USO", "DBA", "PDBC",
-    ],
-    "tematicos": [
-        "ARKK", "ARKG", "ICLN", "BOTZ", "HACK", "SOXX", "SMH",
-    ],
+    "commodities": ["gold", "commodities_broad", "silver"],
+    "tematicos": ["innovation"],
 }
 
 
 def get_etf_tickers(categories: list[str] | None = None) -> list[str]:
     """
     Devuelve una lista de tickers ETF.
-    Si se especifican categorías, filtra. Si no, devuelve todos.
+    Si se especifican categorías (legacy), mapea a las canónicas de etf_config.
+    Si no, devuelve todos los ETFs conocidos.
     """
+    from strategy.etf_config import get_etf_universe_for_category, get_all_etf_tickers as _all
+
     if categories is None:
-        categories = list(ETF_UNIVERSE.keys())
+        return sorted(_all())
+
     result: list[str] = []
     for cat in categories:
-        result.extend(ETF_UNIVERSE.get(cat, []))
+        canonical_cats = _LEGACY_CATEGORY_MAP.get(cat, [cat])
+        for cc in canonical_cats:
+            result.extend(get_etf_universe_for_category(cc))
     return list(dict.fromkeys(result))  # Preserva orden, elimina duplicados
 
 
 def get_etf_categories() -> list[str]:
-    """Devuelve las categorías de ETF disponibles."""
-    return list(ETF_UNIVERSE.keys())
+    """Devuelve las categorías de ETF disponibles (nombres legacy)."""
+    return list(_LEGACY_CATEGORY_MAP.keys())

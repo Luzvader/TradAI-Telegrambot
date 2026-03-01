@@ -23,6 +23,7 @@ from data.fx import get_fx_rate
 from data.market_data import get_prices_batch, refresh_broker_prices
 from database import repository as repo
 from database.models import (
+    AssetType,
     OperationOrigin,
     OperationSide,
     Portfolio,
@@ -37,6 +38,16 @@ from strategy.risk_manager import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _is_known_etf(ticker: str) -> bool:
+    """Check if a ticker is a known ETF from the universe.
+    Fallback for positions without asset_type set."""
+    try:
+        from strategy.etf_config import get_etf_category_for_ticker
+        return get_etf_category_for_ticker(ticker.upper()) is not None
+    except Exception:
+        return False
 
 
 async def init_portfolios() -> dict[str, Portfolio]:
@@ -59,10 +70,12 @@ async def execute_buy(
     market: str = "NASDAQ",
     notes: str | None = None,
     origin: OperationOrigin = OperationOrigin.MANUAL,
+    asset_type: AssetType | None = None,
 ) -> dict[str, Any]:
     """
     Registra una operación de compra.
     Evalúa riesgos (informativo) pero nunca bloquea.
+    asset_type: si es ETF, se marca la posición como tal.
     """
     portfolio = await repo.get_portfolio(portfolio_id)
     if portfolio is None:
@@ -141,6 +154,7 @@ async def execute_buy(
         avg_price=price,
         stop_loss=risk.suggested_stop_loss,
         take_profit=risk.suggested_take_profit,
+        asset_type=asset_type,
     )
 
     # Descontar cash del portfolio
@@ -519,6 +533,23 @@ async def get_portfolio_summary(portfolio_id: int) -> dict[str, Any]:
         for s, v in sector_weights.items()
     }
 
+    # ── Desglose stocks vs ETFs ──
+    stock_value_acct = 0.0
+    etf_value_acct = 0.0
+    for pd_item, pos in zip(pos_details, positions):
+        is_etf = (
+            (hasattr(pos, "asset_type") and pos.asset_type == AssetType.ETF)
+            or _is_known_etf(pos.ticker)
+        )
+        pd_item["asset_type"] = "etf" if is_etf else "stock"
+        if is_etf:
+            etf_value_acct += pd_item["value_acct"]
+        else:
+            stock_value_acct += pd_item["value_acct"]
+
+    etf_pct = round(etf_value_acct / total_with_cash * 100, 2) if total_with_cash > 0 else 0
+    stock_pct = round(stock_value_acct / total_with_cash * 100, 2) if total_with_cash > 0 else 0
+
     return {
         "portfolio_name": portfolio.name,
         "portfolio_type": portfolio.portfolio_type.value,
@@ -533,6 +564,11 @@ async def get_portfolio_summary(portfolio_id: int) -> dict[str, Any]:
         "num_positions": len(positions),
         "positions": pos_details,
         "sector_weights": sector_pcts,
+        # ETF allocation metrics
+        "etf_value": round(etf_value_acct, 2),
+        "stock_value": round(stock_value_acct, 2),
+        "etf_pct": etf_pct,
+        "stock_pct": stock_pct,
     }
 
 

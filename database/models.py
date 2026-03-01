@@ -112,6 +112,7 @@ class Position(Base):
     portfolio_id = Column(Integer, ForeignKey("portfolios.id"), nullable=False)
     ticker = Column(String(20), nullable=False)
     market = Column(String(20), nullable=False, default="NASDAQ")
+    asset_type = Column(Enum(AssetType), default=AssetType.STOCK, nullable=False)
     sector = Column(String(100), nullable=True)
     shares = Column(Float, nullable=False, default=0)
     avg_price = Column(Float, nullable=False, default=0)

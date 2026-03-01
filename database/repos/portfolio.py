@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 
 from database.connection import async_session_factory
 from database.models import (
+    AssetType,
     Operation,
     OperationOrigin,
     OperationSide,
@@ -100,6 +101,7 @@ async def upsert_position(
     avg_price: float,
     stop_loss: float | None = None,
     take_profit: float | None = None,
+    asset_type: AssetType | None = None,
 ) -> Position:
     async with async_session_factory() as session:
         market_norm = (market or "NASDAQ").upper()
@@ -125,6 +127,7 @@ async def upsert_position(
                 avg_price=avg_price,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
+                asset_type=asset_type or AssetType.STOCK,
             )
             session.add(pos)
         else:
@@ -139,6 +142,9 @@ async def upsert_position(
             # Actualizar sector si estaba vacío
             if sector and (pos.sector is None or pos.sector == "N/A"):
                 pos.sector = sector
+            # Actualizar asset_type si se proporcionó y no se había establecido
+            if asset_type is not None:
+                pos.asset_type = asset_type
 
         await session.commit()
         await session.refresh(pos)

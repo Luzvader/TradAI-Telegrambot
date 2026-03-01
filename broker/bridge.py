@@ -30,6 +30,18 @@ _TRADABILITY_CACHE: dict[str, dict[str, Any]] = {}
 _CATALOG_REFRESHED_ON_MISS = False
 
 
+def _detect_asset_type(ticker: str):
+    """Detecta si un ticker es ETF conocido. Retorna AssetType o None."""
+    try:
+        from database.models import AssetType
+        from strategy.etf_config import get_etf_category_for_ticker
+        if get_etf_category_for_ticker(ticker.upper()) is not None:
+            return AssetType.ETF
+    except Exception:
+        pass
+    return None
+
+
 def _check_broker_ready(require_auto_execute: bool = True) -> tuple[Trading212Client | None, str]:
     """Verifica que el broker esté configurado y auto-ejecución activa."""
     client = get_trading212_client()
@@ -487,7 +499,8 @@ async def import_broker_positions(portfolio_id: int) -> dict[str, Any]:
             )
 
             if existing is None:
-                # Crear nueva posición
+                # Crear nueva posición — detectar si es ETF
+                asset_type = _detect_asset_type(ticker)
                 await repo.upsert_position(
                     portfolio_id=portfolio_id,
                     ticker=ticker,
@@ -495,6 +508,7 @@ async def import_broker_positions(portfolio_id: int) -> dict[str, Any]:
                     sector=sector,
                     shares=bp.shares,
                     avg_price=bp.avg_price,
+                    asset_type=asset_type,
                 )
                 imported += 1
             else:

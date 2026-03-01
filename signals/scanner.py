@@ -18,6 +18,7 @@ from strategy.selector import get_strategy_analyzer
 from config.settings import SCAN_MIN_SCORE
 from config.settings import TRADING212_ANALYSIS_ORIENTED
 from signals.builders import compute_diagnostics, build_signal_justification
+from strategy.etf_config import get_all_etf_tickers
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,10 @@ async def scan_opportunities(
         max_results=fetch_count,
         strategy=strategy,
     )
+
+    # Excluir ETFs del escaneo: se gestionan por el ETF allocator
+    etf_tickers = get_all_etf_tickers()
+    top_scores = [vs for vs in top_scores if vs.ticker.upper() not in etf_tickers]
 
     opportunities: list[dict[str, Any]] = []
     ai_count = 0  # Contador real de oportunidades con análisis IA

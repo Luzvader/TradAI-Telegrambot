@@ -30,6 +30,11 @@ MAX_ETFS = 5
 STOCKS_PER_LLM_CALL = 10
 
 # ── ETFs recomendados por estrategia ────────────────────────
+# Nota: El universo canónico de ETFs vive en strategy/etf_config.py.
+# Este mapa se mantiene para el prompt de la watchlist IA,
+# enriqueciendo la sugerencia del LLM con ETFs orientados a
+# cada estrategia. _get_etfs_for_strategy() usa el universo
+# canónico como fuente primaria.
 
 ETF_STRATEGY_MAP: dict[StrategyType, dict[str, list[str]]] = {
     StrategyType.VALUE: {

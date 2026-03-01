@@ -12,6 +12,7 @@ from config.markets import market_display
 from database import repository as repo
 from database.connection import async_session_factory
 from database.models import (
+    AssetType,
     PortfolioType,
     Signal,
 )
@@ -121,18 +122,33 @@ async def _portfolio_summary(portfolio_id: int) -> dict:
     total_pnl = total_value - total_invested
 
     pos_data = []
+    etf_value = 0.0
+    stock_value = 0.0
     for p in positions:
         pnl = _pnl(p)
+        value = round((p.current_price or p.avg_price or 0) * (p.shares or 0), 2)
+        is_etf = getattr(p, "asset_type", None) == AssetType.ETF
+        if not is_etf:
+            try:
+                from strategy.etf_config import get_etf_category_for_ticker
+                is_etf = get_etf_category_for_ticker(p.ticker) is not None
+            except Exception:
+                pass
+        if is_etf:
+            etf_value += value
+        else:
+            stock_value += value
         pos_data.append({
             "ticker": p.ticker,
-            "market": market_display(p.market or "—"),
+            "market": market_display(p.market or "\u2014"),
             "sector": p.sector or "N/A",
             "shares": p.shares,
             "avg_price": p.avg_price,
             "current_price": p.current_price,
-            "value": round((p.current_price or p.avg_price or 0) * (p.shares or 0), 2),
+            "value": value,
             "pnl_abs": pnl["abs"],
             "pnl_pct": pnl["pct"],
+            "asset_type": "etf" if is_etf else "stock",
         })
     pos_data.sort(key=lambda x: x["pnl_pct"], reverse=True)
 
@@ -156,6 +172,10 @@ async def _portfolio_summary(portfolio_id: int) -> dict:
         "total_assets": round(total_equity, 2),
         "positions": pos_data,
         "num_positions": len(pos_data),
+        "etf_value": round(etf_value, 2),
+        "stock_value": round(stock_value, 2),
+        "etf_pct": round(etf_value / total_equity * 100, 1) if total_equity > 0 else 0,
+        "stock_pct": round(stock_value / total_equity * 100, 1) if total_equity > 0 else 0,
     }
 
 
@@ -303,6 +323,20 @@ async def api_openai_usage(days: int = 30):
 async def api_health():
     """Health check."""
     return {"status": "ok", "timestamp": datetime.now(UTC).isoformat()}
+
+
+@router.get("/api/etf")
+async def api_etf_allocation():
+    """API JSON: estado de asignación de ETFs en el portfolio."""
+    portfolio = await repo.get_portfolio_by_type(PortfolioType.REAL)
+    if not portfolio:
+        return {"error": "No portfolio found"}
+    try:
+        from strategy.etf_selector import get_etf_portfolio_status
+        return await get_etf_portfolio_status(portfolio.id)
+    except Exception as e:
+        logger.error(f"Error obteniendo estado ETF: {e}")
+        return {"error": str(e)}
 
 
 @router.get("/api/broker")

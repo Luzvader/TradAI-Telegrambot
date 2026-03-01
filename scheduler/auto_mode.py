@@ -34,7 +34,7 @@ from config.settings import ACCOUNT_CURRENCY, TIMEZONE
 from data.market_data import get_open_markets, is_market_open, is_any_trading_day, refresh_broker_prices
 from data.news import save_context_snapshot
 from database import repository as repo
-from database.models import AutoModeType, OperationOrigin, PortfolioType
+from database.models import AssetType, AutoModeType, OperationOrigin, PortfolioType
 from portfolio.portfolio_manager import (
     check_alerts,
     execute_buy,
@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 # Tracking en memoria para la watchlist (no tiene columna dedicada en BD)
 _last_watchlist_run: dict[int, datetime] = {}  # portfolio_id -> last run UTC
+_last_etf_check: dict[int, datetime] = {}  # portfolio_id -> last ETF allocation check
 
 
 def set_auto_mode_bot(bot: Bot | None) -> None:
@@ -124,6 +125,14 @@ async def _process_auto_portfolio(config, now: datetime) -> None:
         await repo.update_auto_mode_timestamps(
             portfolio_id, last_analyze_at=now
         )
+
+    # ── Gestión de ETFs dinámica (solo con mercados abiertos) ──
+    if markets_open:
+        # Los ETFs se revisan con la misma frecuencia que el scan
+        last_etf = _last_etf_check.get(portfolio_id)
+        if _should_run(last_etf, config.scan_interval_minutes, now):
+            await _auto_manage_etf_allocation(portfolio_id, config.mode)
+            _last_etf_check[portfolio_id] = now
 
     # ── Gestión de watchlist (solo con mercados abiertos) ──
     if config.watchlist_auto_manage and markets_open:
@@ -439,7 +448,12 @@ async def _auto_analyze_positions(portfolio_id: int, config) -> None:
 
 
 async def _auto_execute_buy(portfolio_id: int, signal: dict) -> None:
-    """Ejecuta una compra automática basada en una señal."""
+    """Ejecuta una compra automática basada en una señal.
+
+    El sizing respeta la asignación stock/ETF de la estrategia:
+    el % disponible para acciones es (1 - target_etf_pct), de modo
+    que el sistema reserva presupuesto para los ETFs complementarios.
+    """
     ticker = signal.get("ticker", "")
     price = signal.get("price")
     market = signal.get("market", "NASDAQ")
@@ -458,11 +472,23 @@ async def _auto_execute_buy(portfolio_id: int, signal: dict) -> None:
             logger.warning(f"[AUTO-ON] Sin cash disponible para comprar {ticker}")
             return
 
-        # Usar un máximo del 5% del valor total o el cash disponible
+        # ── Sizing inteligente: respetar split stocks/ETFs ──
+        # El presupuesto de acciones es el total menos la reserva para ETFs
         summary = await get_portfolio_summary(portfolio_id)
+        total_value = summary["total_value"]
+
+        try:
+            from strategy.etf_config import get_etf_config
+            etf_cfg = get_etf_config(portfolio.strategy)
+            stock_budget_pct = 1.0 - etf_cfg.target_etf_pct  # ej: 0.80 para value
+        except Exception:
+            stock_budget_pct = 0.80  # Fallback: 80% para acciones
+
+        # Máx 5% del presupuesto de acciones (no del total)
+        stock_budget = total_value * stock_budget_pct
         max_amount = min(
             portfolio.cash,
-            summary["total_value"] * 0.05,
+            stock_budget * 0.05,  # 5% del presupuesto de acciones
         )
         if max_amount < 10:
             return
@@ -642,6 +668,151 @@ async def _send_sell_confirmation(portfolio_id: int, signal: dict) -> None:
             InlineKeyboardButton(
                 "✅ Vender",
                 callback_data=f"auto_sell:{ticker}:{market}:{shares:.6f}:{price:.2f}",
+            ),
+            InlineKeyboardButton("❌ Rechazar", callback_data="auto_reject"),
+        ]
+    ])
+    await notify_with_buttons(text, reply_markup=keyboard)
+
+
+# ── Gestión dinámica de ETFs ─────────────────────────────────
+
+
+async def _auto_manage_etf_allocation(portfolio_id: int, mode: AutoModeType) -> None:
+    """
+    Gestiona la asignación de ETFs dinámicamente según el portfolio real.
+
+    Analiza la composición actual (acciones compradas automática y manualmente),
+    identifica huecos de diversificación y recomienda/compra ETFs que
+    complementen la cartera según la estrategia activa.
+
+    - ON:   ejecuta compras de ETFs automáticamente.
+    - SAFE: envía recomendaciones con botones de confirmación.
+    """
+    logger.info(f"📦 [AUTO-{mode.value.upper()}] Revisando asignación ETF para portfolio {portfolio_id}")
+
+    try:
+        from strategy.etf_selector import compute_etf_allocation
+
+        plan = await compute_etf_allocation(portfolio_id)
+
+        if not plan.rebalance_needed:
+            logger.debug(f"[AUTO-ETF] No requiere rebalanceo: {plan.summary}")
+            return
+
+        if not plan.recommendations:
+            logger.debug(f"[AUTO-ETF] Sin recomendaciones ETF disponibles")
+            return
+
+        # Construir mensaje de notificación
+        mode_label = "🟢 ON" if mode == AutoModeType.ON else "🛡️ SAFE"
+        text = (
+            f"🤖 *MODO AUTO ({mode_label}) — Asignación ETF*\n\n"
+            f"📊 ETFs actuales: {plan.current_etf_pct:.1%} | "
+            f"Objetivo: {plan.target_etf_pct:.1%}\n"
+            f"💰 A invertir en ETFs: {plan.total_amount_to_invest:.2f}\n\n"
+        )
+
+        for i, rec in enumerate(plan.recommendations, 1):
+            name_str = f" — {rec['name']}" if rec.get('name') else ""
+            text += (
+                f"{i}. 📦 *{rec['ticker']}*{name_str}\n"
+                f"   Categoría: {rec['category']} | Score: {rec['score']:.0f}\n"
+                f"   💵 Monto: ${rec['amount']:.2f} ({rec['shares']:.4f} acciones)\n"
+                f"   🎯 Complementariedad: {rec['complementarity']:.0f}%\n"
+            )
+            if rec.get('reasoning'):
+                text += f"   📝 {rec['reasoning'][0]}\n"
+            text += "\n"
+
+        if mode == AutoModeType.ON:
+            # Full auto: ejecutar compras de ETFs
+            for rec in plan.recommendations:
+                await _auto_execute_etf_buy(portfolio_id, rec)
+            text += "_Compras de ETFs ejecutadas automáticamente._\n"
+            await _notify(text)
+
+        elif mode == AutoModeType.SAFE:
+            # Safe: enviar con botones de confirmación para cada ETF
+            await _notify(text)
+            for rec in plan.recommendations:
+                await _send_etf_buy_confirmation(portfolio_id, rec)
+
+    except Exception as e:
+        logger.error(f"Error en auto_manage_etf_allocation: {e}")
+
+
+async def _auto_execute_etf_buy(portfolio_id: int, recommendation: dict) -> None:
+    """Ejecuta una compra automática de ETF."""
+    ticker = recommendation.get("ticker", "")
+    price = recommendation.get("price")
+    amount = recommendation.get("amount", 0)
+    shares = recommendation.get("shares", 0)
+    if not ticker or not price or shares <= 0:
+        return
+
+    try:
+        portfolio = await repo.get_portfolio(portfolio_id)
+        if portfolio is None or portfolio.cash < amount:
+            logger.warning(f"[AUTO-ETF] Sin cash suficiente para comprar {ticker}")
+            return
+
+        result = await execute_buy(
+            portfolio_id=portfolio_id,
+            ticker=ticker,
+            market="NASDAQ",  # ETFs cotizan en US
+            price=price,
+            shares=shares,
+            origin=OperationOrigin.AUTO,
+            asset_type=AssetType.ETF,
+        )
+
+        if result["success"]:
+            text = (
+                f"🤖 *AUTO — Compra ETF ejecutada* ✅\n\n"
+                f"📦 *{ticker}* ({recommendation.get('category', 'N/A')})\n"
+                f"💵 Precio: ${price:.2f}\n"
+                f"📊 Acciones: {result.get('shares', shares):.4f}\n"
+                f"💰 Total: ${result.get('amount', 0):.2f}\n"
+                f"🎯 Complementariedad: {recommendation.get('complementarity', 0):.0f}%\n"
+            )
+            if result.get("broker_executed"):
+                text += "🏦 Broker: Trading212 ✅\n"
+            await _notify(text)
+        else:
+            logger.error(f"[AUTO-ETF] Error comprando {ticker}: {result.get('error')}")
+
+    except Exception as e:
+        logger.error(f"[AUTO-ETF] Excepción comprando ETF {ticker}: {e}")
+
+
+async def _send_etf_buy_confirmation(portfolio_id: int, recommendation: dict) -> None:
+    """Envía botón de confirmación para compra de ETF (modo SAFE)."""
+    ticker = recommendation.get("ticker", "")
+    price = recommendation.get("price")
+    shares = recommendation.get("shares", 0)
+    amount = recommendation.get("amount", 0)
+    if not ticker or not price:
+        return
+
+    name_str = f" — {recommendation['name']}" if recommendation.get('name') else ""
+    text = (
+        f"🛡️ *MODO SAFE — ¿Confirmar compra ETF?*\n\n"
+        f"📦 *{ticker}*{name_str}\n"
+        f"💵 Precio: ${price:.2f}\n"
+        f"📊 Acciones: ~{shares:.4f} (~${amount:.2f})\n"
+        f"📂 Categoría: {recommendation.get('category', 'N/A')}\n"
+        f"⭐ Score: {recommendation.get('score', 'N/A')}\n"
+        f"🎯 Complementariedad: {recommendation.get('complementarity', 0):.0f}%\n"
+    )
+    if recommendation.get('reasoning'):
+        text += f"📝 {recommendation['reasoning'][0]}\n"
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "✅ Comprar ETF",
+                callback_data=f"auto_buy_etf:{ticker}:NASDAQ:{shares:.6f}:{price:.2f}",
             ),
             InlineKeyboardButton("❌ Rechazar", callback_data="auto_reject"),
         ]

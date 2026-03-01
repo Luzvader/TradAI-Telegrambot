@@ -12,8 +12,9 @@ from data.fundamentals import fetch_fundamentals
 from data.market_data import get_current_price
 from data.technical import get_technical_analysis
 from database import repository as repo
-from database.models import SignalType, StrategyType
+from database.models import AssetType, SignalType, StrategyType
 from strategy import technical_analyst, price_analyst
+from strategy.etf_config import get_etf_category_for_ticker
 from strategy.risk_manager import check_stop_loss_take_profit
 from strategy.score import StrategyScore
 from strategy.selector import get_strategy_analyzer
@@ -42,6 +43,15 @@ async def generate_signals_for_portfolio(
 
     for pos in positions:
         try:
+            # ETFs se gestionan por el sistema de asignación ETF, no por señales de stock
+            is_etf = (
+                getattr(pos, "asset_type", None) == AssetType.ETF
+                or get_etf_category_for_ticker(pos.ticker) is not None
+            )
+            if is_etf:
+                logger.debug(f"Posición ETF {pos.ticker} omitida (gestionada por ETF allocator)")
+                continue
+
             # Actualizar precio (ahora async)
             price = await get_current_price(pos.ticker, pos.market)
             if price is not None:

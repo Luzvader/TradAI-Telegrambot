@@ -8,8 +8,9 @@ from telegram.ext import ContextTypes
 
 from config.markets import market_display
 from database import repository as repo
-from database.models import PortfolioType, StrategyType
+from database.models import AssetType, OperationOrigin, PortfolioType, StrategyType
 from portfolio.portfolio_manager import execute_buy, execute_sell
+from strategy.etf_config import get_all_etf_tickers
 from telegram_bot.handlers.helpers import _escape_md
 
 logger = logging.getLogger(__name__)
@@ -47,12 +48,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             f"⏳ Comprando {shares} acc de {ticker} ({mkt_name}) a {price}$..."
         )
 
+        # Detectar si es un ETF conocido
+        _etf_tickers = get_all_etf_tickers()
+        detected_asset_type = AssetType.ETF if ticker.upper() in _etf_tickers else None
+
         result = await execute_buy(
             portfolio_id=portfolio.id,
             ticker=ticker,
             market=market,
             price=price,
             shares=shares,
+            asset_type=detected_asset_type,
         )
 
         if result["success"]:
@@ -166,7 +172,50 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         else:
             await query.edit_message_text("❌ Error al cambiar la estrategia.")
 
-    # ── Auto mode SAFE: buy confirm ──
+    # ── Auto mode SAFE: ETF buy confirm ──
+    elif data.startswith("auto_buy_etf:"):
+        parts = data.split(":")
+        if len(parts) != 5:
+            await query.edit_message_text("❌ Datos inválidos.")
+            return
+        ticker, market = parts[1], parts[2]
+        shares, price = float(parts[3]), float(parts[4])
+
+        portfolio = await repo.get_portfolio_by_type(PortfolioType.REAL)
+        if portfolio is None:
+            await query.edit_message_text("❌ Cartera no inicializada.")
+            return
+
+        mkt_name = market_display(market)
+        await query.edit_message_text(
+            f"⏳ 🛡️ SAFE — Comprando ETF {shares:.4f} acc de {ticker} ({mkt_name}) a {price}$..."
+        )
+
+        result = await execute_buy(
+            portfolio_id=portfolio.id,
+            ticker=ticker,
+            market=market,
+            price=price,
+            shares=shares,            origin=OperationOrigin.SAFE,            asset_type=AssetType.ETF,
+        )
+
+        if result["success"]:
+            text = "🛡️ *SAFE — COMPRA ETF ejecutada* ✅\n\n"
+            text += f"📦 Ticker: {_escape_md(ticker)} ({_escape_md(mkt_name)})\n"
+            text += f"💵 Precio: {price}$\n"
+            text += f"📊 Acciones: {result.get('shares', shares):.4f}\n"
+            text += f"💰 Total: {result.get('amount', 0):.2f}$\n"
+            if result.get("broker_executed"):
+                text += "🏦 Broker: Trading212 ✅\n"
+        else:
+            text = f"❌ *Error:* {result['error']}"
+
+        try:
+            await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+        except Exception:
+            await query.edit_message_text(text)
+
+    # ── Auto mode SAFE: stock buy confirm ──
     elif data.startswith("auto_buy:"):
         parts = data.split(":")
         if len(parts) != 5:
@@ -237,6 +286,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             market=market,
             price=price,
             shares_to_sell=shares,
+            origin=OperationOrigin.SAFE,
         )
 
         if result["success"]:

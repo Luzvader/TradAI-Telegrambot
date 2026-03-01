@@ -8,7 +8,7 @@ registre handlers y menú de Telegram desde un punto único.
 Sub-módulos:
   • helpers          – Utilidades compartidas (_parse_buy_sell, _send_long)
   • registry         – CommandInfo dataclass
-  • portfolio_cmds   – /cartera, /buy, /sell, /capital, /dividendos
+  • portfolio_cmds   – /cartera, /buy, /sell, /capital, /dividendos, /etf_cartera
   • analysis_cmds    – /analizar, /scan, /macro, /strategy, /historial, /comparar,
                        /backtest, /diversificacion, /etf, /insider
   • system_cmds      – /help, /costes, unknown_command
