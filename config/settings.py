@@ -91,9 +91,15 @@ WEB_PORT: int = _get_int("WEB_PORT", 8080)
 WEB_HOST: str = os.getenv("WEB_HOST", "0.0.0.0")
 WEB_DOMAIN: str = os.getenv("WEB_DOMAIN", "")  # ej: "123.45.67.89" o "mi-vps.com"
 # ── Trading212 Broker ────────────────────────────────────────
+# Credenciales principales (aplican al modo por defecto TRADING212_MODE)
 TRADING212_API_KEY: str = os.getenv("TRADING212_API_KEY", "")
 TRADING212_API_SECRET: str = os.getenv("TRADING212_API_SECRET", "")
 TRADING212_MODE: str = os.getenv("TRADING212_MODE", "demo")  # "demo" o "live"
+# Credenciales separadas por modo (demo y live tienen cuentas diferentes en T212)
+TRADING212_DEMO_API_KEY: str = os.getenv("TRADING212_DEMO_API_KEY", "")
+TRADING212_DEMO_API_SECRET: str = os.getenv("TRADING212_DEMO_API_SECRET", "")
+TRADING212_LIVE_API_KEY: str = os.getenv("TRADING212_LIVE_API_KEY", "")
+TRADING212_LIVE_API_SECRET: str = os.getenv("TRADING212_LIVE_API_SECRET", "")
 TRADING212_AUTO_EXECUTE: bool = _get_bool("TRADING212_AUTO_EXECUTE", True)
 TRADING212_REQUIRE_EXECUTION: bool = _get_bool(
     "TRADING212_REQUIRE_EXECUTION", True
@@ -101,6 +107,33 @@ TRADING212_REQUIRE_EXECUTION: bool = _get_bool(
 TRADING212_ANALYSIS_ORIENTED: bool = _get_bool(
     "TRADING212_ANALYSIS_ORIENTED", True
 )
+
+
+def get_trading212_credentials() -> dict[str, tuple[str, str]]:
+    """
+    Devuelve las credenciales T212 disponibles por modo.
+    Retorno: {"demo": (key, secret), "live": (key, secret), ...}
+
+    Lógica de resolución:
+      1. TRADING212_DEMO_API_KEY / SECRET  →  modo demo
+      2. TRADING212_LIVE_API_KEY / SECRET  →  modo live
+      3. TRADING212_API_KEY / SECRET       →  modo TRADING212_MODE (fallback)
+    """
+    creds: dict[str, tuple[str, str]] = {}
+
+    # Credenciales específicas por modo
+    if TRADING212_DEMO_API_KEY and TRADING212_DEMO_API_SECRET:
+        creds["demo"] = (TRADING212_DEMO_API_KEY, TRADING212_DEMO_API_SECRET)
+    if TRADING212_LIVE_API_KEY and TRADING212_LIVE_API_SECRET:
+        creds["live"] = (TRADING212_LIVE_API_KEY, TRADING212_LIVE_API_SECRET)
+
+    # Fallback: credenciales genéricas → modo por defecto
+    if TRADING212_API_KEY and TRADING212_API_SECRET:
+        mode = TRADING212_MODE.lower()
+        if mode not in creds:  # no pisar si ya hay específicas
+            creds[mode] = (TRADING212_API_KEY, TRADING212_API_SECRET)
+
+    return creds
 
 # ── Backtesting continuo en demo ──────────────────────────────
 BACKTEST_CONTINUOUS_ENABLED: bool = _get_bool("BACKTEST_CONTINUOUS_ENABLED", True)
@@ -142,9 +175,10 @@ def validate_settings() -> list[str]:
         warnings.append(
             f"TRADING212_MODE='{TRADING212_MODE}' inválido. Usa 'demo' o 'live'."
         )
-    if TRADING212_AUTO_EXECUTE and (not TRADING212_API_KEY or not TRADING212_API_SECRET):
+    t212_creds = get_trading212_credentials()
+    if TRADING212_AUTO_EXECUTE and not t212_creds:
         warnings.append(
-            "TRADING212_AUTO_EXECUTE activo pero TRADING212_API_KEY o API_SECRET vacío."
+            "TRADING212_AUTO_EXECUTE activo pero no hay credenciales T212 configuradas."
         )
     if TRADING212_REQUIRE_EXECUTION and not TRADING212_AUTO_EXECUTE:
         warnings.append(
@@ -154,9 +188,13 @@ def validate_settings() -> list[str]:
         warnings.append(
             "TRADING212_API_KEY configurada pero falta TRADING212_API_SECRET."
         )
-    if TRADING212_AUTO_EXECUTE and TRADING212_MODE == "live":
+    if TRADING212_AUTO_EXECUTE and "live" in t212_creds:
         warnings.append(
-            "⚠️ TRADING212 en modo LIVE con auto-ejecución: operaciones con dinero REAL."
+            "⚠️ TRADING212 LIVE configurado con auto-ejecución: operaciones con dinero REAL."
+        )
+    if len(t212_creds) == 2:
+        warnings.append(
+            "🏦 Trading212 dual mode: demo + live configurados."
         )
     if BACKTEST_INTERVAL_MINUTES < 5:
         warnings.append(

@@ -936,12 +936,35 @@ def init_trading212_dual(
     Inicializa DOS clientes Trading212 (demo + live) con las mismas
     credenciales.  ``primary_mode`` se usa como default cuando no se
     especifica modo.
+
+    NOTA: normalmente cada modo requiere credenciales distintas.
+    Usa ``init_trading212_from_credentials`` para el caso habitual.
     """
     global _default_mode
     _default_mode = primary_mode.lower()
     for m in ("demo", "live"):
         init_trading212(api_key, api_secret, m)
     logger.info("🔗 Trading212 dual: demo + live inicializados")
+    return dict(_clients)
+
+
+def init_trading212_from_credentials(
+    credentials: dict[str, tuple[str, str]],
+    primary_mode: str = "demo",
+) -> dict[str, Trading212Client]:
+    """
+    Inicializa clientes Trading212 a partir de un dict de credenciales
+    por modo.  Cada modo (demo/live) tiene su propio par (key, secret).
+
+    ``credentials`` = {"demo": (key, secret), "live": (key, secret)}
+    Solo se crean clientes para los modos con credenciales.
+    """
+    global _default_mode
+    _default_mode = primary_mode.lower()
+    for mode, (key, secret) in credentials.items():
+        init_trading212(key, secret, mode)
+    modes = ", ".join(m.upper() for m in _clients)
+    logger.info(f"🔗 Trading212 inicializado: {modes}")
     return dict(_clients)
 
 

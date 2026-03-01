@@ -174,8 +174,10 @@ Edita `.env` con:
 - `TELEGRAM_ALLOWED_USERS` — Tu user ID de Telegram
 - `OPENAI_API_KEY` — Clave de OpenAI
 - `NEWS_API_KEY` — (Opcional) Clave de [NewsAPI](https://newsapi.org)
-- `TRADING212_API_KEY` / `TRADING212_API_SECRET` — Credenciales del broker
-- `TRADING212_MODE=demo` — Mantener demo para backtesting/operativa segura
+- `TRADING212_API_KEY` / `TRADING212_API_SECRET` — Credenciales del broker (modo por defecto)
+- `TRADING212_DEMO_API_KEY` / `TRADING212_DEMO_API_SECRET` — Credenciales cuenta demo (opcional)
+- `TRADING212_LIVE_API_KEY` / `TRADING212_LIVE_API_SECRET` — Credenciales cuenta live (opcional)
+- `TRADING212_MODE=demo` — Modo por defecto (demo/live). Si se configuran DEMO+LIVE, ambos se usan
 
 ### 3. Arrancar con Docker (recomendado)
 

@@ -73,13 +73,12 @@ async def main() -> None:
     )
 
     # 2b. Inicializar broker Trading212
-    from config.settings import TRADING212_API_KEY, TRADING212_API_SECRET, TRADING212_MODE
-    if TRADING212_API_KEY and TRADING212_API_SECRET:
-        from broker.trading212 import init_trading212_dual
+    from config.settings import TRADING212_MODE, get_trading212_credentials
+    t212_creds = get_trading212_credentials()
+    if t212_creds:
+        from broker.trading212 import init_trading212_from_credentials
         try:
-            clients = init_trading212_dual(
-                TRADING212_API_KEY, TRADING212_API_SECRET, TRADING212_MODE,
-            )
+            clients = init_trading212_from_credentials(t212_creds, TRADING212_MODE)
             modes = ", ".join(m.upper() for m in clients)
             logger.info(f"🏦 Trading212 broker inicializado ({modes})")
 
@@ -102,7 +101,7 @@ async def main() -> None:
         except Exception as e:
             logger.warning(f"⚠️ Error inicializando Trading212: {e}")
     else:
-        logger.info("🏦 Trading212 no configurado (sin API key/secret)")
+        logger.info("🏦 Trading212 no configurado (sin credenciales)")
 
     # 3. Crear bot de Telegram
     logger.info("🤖 Iniciando bot de Telegram...")
