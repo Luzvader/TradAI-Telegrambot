@@ -400,32 +400,6 @@ def _get_price_at(
     return None
 
 
-def _rebalance(
-    date_str: str,
-    cash: float,
-    positions: dict[str, BacktestPosition],
-    scores: dict[str, StrategyScore],
-    price_data: dict[str, pd.DataFrame],
-    date,
-    config: BacktestConfig,
-) -> tuple[float, dict[str, BacktestPosition], list[dict]]:
-    """
-    Rebalanceo legacy (sin técnicos ni learning).
-    Mantenido por compatibilidad; use _smart_rebalance para decisiones
-    inteligentes.
-    """
-    return _smart_rebalance(
-        date_str=date_str,
-        cash=cash,
-        positions=positions,
-        scores=scores,
-        price_data=price_data,
-        date=date,
-        config=config,
-        learning_adj={},
-    )
-
-
 def _smart_rebalance(
     date_str: str,
     cash: float,

@@ -525,7 +525,7 @@ Además:
 
 
 async def get_macro_analysis(strategy: str | None = None) -> str:
-    """Genera un análisis macroeconómico general."""
+    """Genera un análisis macroeconómico breve (usado por /macro manual)."""
     geo = await get_geopolitical_context()
     prompt = f"""Análisis macro breve basado en titulares recientes:
 
@@ -539,6 +539,163 @@ Incluye:
 5. Recomendación (incrementar/mantener/reducir exposición)
 """
     return await _call_llm(prompt, system=get_strategy_prompt(strategy), max_tokens=600, context="macro_analysis")
+
+
+async def get_deep_macro_analysis(
+    strategy: str | None = None,
+    session: str = "apertura",
+    portfolio_summary: dict | None = None,
+) -> str:
+    """Genera un análisis macroeconómico profundo y detallado.
+
+    Diseñado para ejecutarse dos veces al día (apertura y cierre).
+    Recopila noticias de múltiples categorías, contexto geopolítico,
+    datos sectoriales y aprendizaje previo para un análisis exhaustivo.
+
+    Args:
+        strategy: Estrategia activa del portfolio.
+        session: "apertura" o "cierre" — adapta el enfoque del análisis.
+        portfolio_summary: Resumen del portfolio para contextualizar.
+    """
+    # 1. Contexto geopolítico amplio
+    geo = await get_geopolitical_context()
+
+    # 2. Noticias macro económicas
+    macro_news = await get_sector_news("economy")
+    macro_headlines = "\n".join(
+        [f"  - {n['title']} ({n['source']})" for n in macro_news[:8]]
+    ) or "Sin noticias macro adicionales."
+
+    # 3. Noticias por sector clave
+    sectors = ["technology", "finance", "healthcare", "energy"]
+    sector_blocks: list[str] = []
+    for sector in sectors:
+        news = await get_sector_news(sector)
+        if news:
+            headlines = "\n".join([f"    - {n['title']}" for n in news[:4]])
+            sector_blocks.append(f"  📌 {sector.upper()}:\n{headlines}")
+
+    sector_text = "\n".join(sector_blocks) if sector_blocks else "Sin noticias sectoriales."
+
+    # 4. Aprendizaje previo (lecciones del mercado)
+    learning_summary = await repo.get_learning_summary()
+    recent_lessons = await repo.get_learning_logs(limit=5)
+    lessons_text = "\n".join(
+        [f"  - {l.ticker} ({l.outcome}): {l.lessons_learned}" for l in recent_lessons if l.lessons_learned]
+    ) or "Sin lecciones recientes."
+
+    # 5. Contexto histórico (último contexto guardado)
+    prev_context = ""
+    try:
+        latest_ctx = await repo.get_latest_context("geopolitical", limit=1)
+        if latest_ctx and latest_ctx[0].summary:
+            prev_context = f"\nCONTEXTO PREVIO (última captura):\n{latest_ctx[0].summary[:500]}\n"
+    except Exception:
+        pass
+
+    # 6. Resumen del portfolio
+    portfolio_text = ""
+    if portfolio_summary:
+        pv = portfolio_summary.get('total_value', 'N/A')
+        pc = portfolio_summary.get('cash', 'N/A')
+        pp = portfolio_summary.get('num_positions', 0)
+        pr = portfolio_summary.get('total_pnl_pct', 0)
+        portfolio_text = f"\nPORTFOLIO ACTUAL: Valor {pv}€ | Cash {pc}€ | {pp} posiciones | PnL {pr:+.1f}%\n"
+
+        # Top positions
+        positions = portfolio_summary.get('positions', [])
+        if positions:
+            top = sorted(positions, key=lambda p: abs(p.get('pnl_pct', 0)), reverse=True)[:5]
+            portfolio_text += "Posiciones destacadas:\n"
+            for p in top:
+                emoji = "🟢" if p.get('pnl_pct', 0) >= 0 else "🔴"
+                portfolio_text += f"  {emoji} {p['ticker']}: {p.get('pnl_pct', 0):+.1f}% | Peso: {p.get('weight_pct', 0):.1f}%\n"
+
+    # 7. Determinar enfoque según sesión
+    if session == "apertura":
+        session_focus = """ENFOQUE APERTURA:
+- Qué ha cambiado desde ayer (overnight, futuros, Asia/Europa)
+- Eventos clave del día (datos macro, earnings, bancos centrales)
+- Posibles gaps de apertura y su implicación
+- Plan de acción para hoy: qué vigilar, posibles movimientos"""
+    else:
+        session_focus = """ENFOQUE CIERRE:
+- Resumen de la sesión: qué ha movido los mercados hoy
+- Cierre de principales índices y su lectura
+- Qué funcionó y qué falló hoy en las tesis de inversión
+- Posicionamiento para mañana: riesgos overnight, ajustes recomendados"""
+
+    prompt = f"""ANÁLISIS MACROECONÓMICO Y GEOPOLÍTICO PROFUNDO — Sesión de {session.upper()}
+
+{session_focus}
+
+═══════════════════════════════════════════
+CONTEXTO GEOPOLÍTICO ACTUAL:
+{geo}
+{prev_context}
+═══════════════════════════════════════════
+NOTICIAS MACRO / ECONÓMICAS:
+{macro_headlines}
+
+═══════════════════════════════════════════
+ANÁLISIS SECTORIAL:
+{sector_text}
+
+═══════════════════════════════════════════
+APRENDIZAJE PREVIO (Win rate: {learning_summary.get('wins', 0)}/{learning_summary.get('total_trades_analyzed', 0)}, Avg profit: {learning_summary.get('avg_profit_pct', 0):.1f}%):
+{lessons_text}
+{portfolio_text}
+═══════════════════════════════════════════
+
+Responde con un análisis PROFUNDO y DETALLADO que cubra:
+
+📊 1. PANORAMA MACRO GLOBAL
+   - Estado de la economía global (expansión/desaceleración/recesión)
+   - Política monetaria: tipos de interés actuales y expectativas (Fed, BCE, BoE)
+   - Inflación: tendencia y su impacto en distintos activos
+   - Mercado laboral y consumo
+   - Divisas relevantes (EUR/USD, GBP, etc.) y su impacto
+
+🌍 2. ANÁLISIS GEOPOLÍTICO
+   - Conflictos y tensiones actuales con impacto en mercados
+   - Política comercial y aranceles
+   - Riesgos de cola (tail risks) geopolíticos
+   - Impacto en cadenas de suministro y commodities
+
+📈 3. MERCADOS Y FLUJOS
+   - Sentimiento general del mercado (fear/greed, VIX implícito)
+   - Rotación sectorial observada
+   - Flujos institucionales (risk-on vs risk-off)
+   - Niveles técnicos clave de índices principales (S&P 500, NASDAQ, Euro Stoxx)
+
+🏭 4. ANÁLISIS SECTORIAL DETALLADO
+   Para cada sector relevante:
+   - Dinámica actual (vientos a favor / en contra)
+   - Catalizadores próximos (earnings, regulación, datos)
+   - Valoraciones relativas (caro/barato vs historia)
+
+⚠️ 5. RIESGOS Y OPORTUNIDADES
+   - Top 5 riesgos ordenados por probabilidad × impacto
+   - Top 5 oportunidades con horizonte temporal
+   - Escenarios: alcista / base / bajista con probabilidades
+
+🎯 6. CONCLUSIÓN Y RECOMENDACIONES
+   - Sentimiento del mercado: 1 (pánico) a 10 (euforia)
+   - Régimen de mercado: risk-on / neutral / risk-off
+   - Recomendación de exposición: incrementar / mantener / reducir (con %)
+   - Sectores a sobreponderar y infraponderar
+   - Acciones concretas recomendadas para hoy/mañana
+   - Nivel de cautela recomendado (1-5)
+
+Sé exhaustivo, riguroso y basado en datos. Usa emojis para estructura visual. En español.
+"""
+    return await _call_llm(
+        prompt,
+        system=get_strategy_prompt(strategy),
+        max_tokens=3000,
+        context=f"deep_macro_{session}",
+        cache_ttl=1800,  # 30 min de caché para evitar duplicados en ciclos rápidos
+    )
 
 
 async def generate_trade_rationale(

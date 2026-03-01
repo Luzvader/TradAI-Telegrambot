@@ -29,7 +29,7 @@ from config.settings import (
     TELEGRAM_CHAT_ID,
     TIMEZONE,
 )
-from data.market_data import is_market_open, get_current_price
+from data.market_data import is_market_open, is_any_trading_day, get_current_price
 from data.news import save_context_snapshot
 from database import repository as repo
 from database.models import PortfolioType
@@ -285,7 +285,11 @@ async def job_generate_signals() -> None:
 
 
 async def job_daily_summary() -> None:
-    """Genera y envía un resumen diario."""
+    """Genera y envía un resumen diario (solo en días de mercado)."""
+    if not is_any_trading_day():
+        logger.debug("🔇 Día no hábil, saltando resumen diario")
+        return
+
     from portfolio.portfolio_manager import get_portfolio_summary
 
     text = "☀️ *RESUMEN DIARIO — TradAI*\n"
@@ -333,7 +337,9 @@ async def job_daily_summary() -> None:
 
 
 async def job_save_context() -> None:
-    """Guarda una instantánea del contexto geopolítico."""
+    """Guarda una instantánea del contexto geopolítico (solo en días de mercado)."""
+    if not is_any_trading_day():
+        return
     await save_context_snapshot()
 
 
@@ -510,7 +516,10 @@ async def job_weekly_benchmark() -> None:
 
 async def job_portfolio_snapshot() -> None:
     """Guarda un snapshot diario del portfolio para tracking histórico.
-    Incluye datos de cuenta T212 cuando está disponible."""
+    Solo en días de mercado. Incluye datos de cuenta T212."""
+    if not is_any_trading_day():
+        return
+
     from portfolio.portfolio_manager import get_portfolio_summary
 
     real = await repo.get_portfolio_by_type(PortfolioType.REAL)
@@ -617,8 +626,11 @@ async def job_sync_broker() -> None:
 async def job_check_dividends_t212() -> None:
     """
     Registra automáticamente dividendos cobrados desde Trading212.
-    Se ejecuta diariamente para detectar nuevos dividendos.
+    Se ejecuta diariamente en días de mercado para detectar nuevos dividendos.
     """
+    if not is_any_trading_day():
+        return
+
     from data.dividends import check_and_record_dividends
 
     real = await repo.get_portfolio_by_type(PortfolioType.REAL)
@@ -660,7 +672,11 @@ async def job_check_dividends_t212() -> None:
 
 
 async def job_check_custom_alerts() -> None:
-    """Comprueba alertas personalizadas (precio, volumen, RSI, técnicos)."""
+    """Comprueba alertas personalizadas (precio, volumen, RSI, técnicos).
+    Solo en días de mercado para evitar lecturas de precios obsoletos."""
+    if not is_any_trading_day():
+        return
+
     alerts = await repo.get_active_alerts()
     if not alerts:
         return
@@ -737,7 +753,11 @@ async def job_check_earnings_calendar() -> None:
     Comprueba el calendario de earnings de cartera y watchlist.
     Notifica cuando hay resultados próximos (≤7 días) y lanza
     análisis IA pre-earnings para preparar la decisión.
+    Solo se ejecuta en días de mercado.
     """
+    if not is_any_trading_day():
+        return
+
     from data.earnings import check_upcoming_earnings
 
     tickers: list[tuple[str, str]] = []

@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 
-from ai.analyst import analyze_with_context, get_macro_analysis
+from ai.analyst import analyze_with_context, get_macro_analysis, get_deep_macro_analysis
 from ai.watchlist import ai_generate_watchlist, refresh_watchlist_analysis
 from broker.bridge import (
     get_broker_account_cash,
@@ -31,7 +31,7 @@ from broker.bridge import (
 from config import settings
 from config.markets import market_display, MARKET_CURRENCY, format_price, get_currency_symbol
 from config.settings import ACCOUNT_CURRENCY, TIMEZONE
-from data.market_data import get_open_markets, is_market_open, refresh_broker_prices
+from data.market_data import get_open_markets, is_market_open, is_any_trading_day, refresh_broker_prices
 from data.news import save_context_snapshot
 from database import repository as repo
 from database.models import AutoModeType, OperationOrigin, PortfolioType
@@ -88,11 +88,17 @@ async def _process_auto_portfolio(config, now: datetime) -> None:
     """Procesa un portfolio en modo auto."""
     portfolio_id = config.portfolio_id
 
-    # ── Comprobar si hay algún mercado abierto ──
+    # ── Comprobar si hoy es día de trading y si hay mercados abiertos ──
+    trading_day = is_any_trading_day()
     open_markets = get_open_markets()
     markets_open = len(open_markets) > 0
 
-    # ── Sync con Trading212 al inicio de cada ciclo (siempre, para tener datos frescos) ──
+    # Si no es día de trading, solo permitimos el resumen diario
+    if not trading_day:
+        await _check_daily_summary(config, now)
+        return
+
+    # ── Sync con Trading212 al inicio de cada ciclo (siempre en día de trading) ──
     await _auto_sync_broker(portfolio_id)
 
     # ── Scan de oportunidades (solo con mercados abiertos) ──
@@ -102,9 +108,10 @@ async def _process_auto_portfolio(config, now: datetime) -> None:
             portfolio_id, last_scan_at=now
         )
 
-    # ── Análisis macro (puede ejecutarse sin mercados abiertos) ──
-    if _should_run(config.last_macro_at, config.macro_interval_minutes, now):
-        await _auto_macro(portfolio_id)
+    # ── Análisis macro profundo (solo en días de trading: apertura ~7:30 y cierre ~18:00) ──
+    macro_session = _get_macro_session(now)
+    if macro_session and _should_run_macro_session(config, now, macro_session):
+        await _auto_macro(portfolio_id, session=macro_session)
         await repo.update_auto_mode_timestamps(
             portfolio_id, last_macro_at=now
         )
@@ -143,6 +150,58 @@ def _should_run(
             f"(intervalo: {interval_minutes} min)"
         )
     return should
+
+
+# Ventanas horarias para el macro profundo (hora local TIMEZONE)
+_MACRO_MORNING_WINDOW = (7, 15, 8, 30)   # 7:15 – 8:30 (pre-apertura EU)
+_MACRO_EVENING_WINDOW = (17, 30, 19, 0)  # 17:30 – 19:00 (post-cierre EU)
+
+
+def _get_macro_session(now: datetime) -> str | None:
+    """Devuelve 'apertura' o 'cierre' si estamos en ventana macro, None si no."""
+    spain_tz = ZoneInfo(TIMEZONE)
+    local = now.astimezone(spain_tz)
+    t = local.hour * 60 + local.minute  # minutos desde medianoche
+
+    morning_start = _MACRO_MORNING_WINDOW[0] * 60 + _MACRO_MORNING_WINDOW[1]
+    morning_end = _MACRO_MORNING_WINDOW[2] * 60 + _MACRO_MORNING_WINDOW[3]
+    evening_start = _MACRO_EVENING_WINDOW[0] * 60 + _MACRO_EVENING_WINDOW[1]
+    evening_end = _MACRO_EVENING_WINDOW[2] * 60 + _MACRO_EVENING_WINDOW[3]
+
+    if morning_start <= t <= morning_end:
+        return "apertura"
+    if evening_start <= t <= evening_end:
+        return "cierre"
+    return None
+
+
+def _should_run_macro_session(config, now: datetime, session: str) -> bool:
+    """Comprueba si el macro de esta sesión ya se ejecutó hoy."""
+    spain_tz = ZoneInfo(TIMEZONE)
+    local_now = now.astimezone(spain_tz)
+
+    if config.last_macro_at is None:
+        return True
+
+    last_local = config.last_macro_at.astimezone(spain_tz)
+
+    # Si la última ejecución fue otro día, siempre ejecutar
+    if last_local.date() != local_now.date():
+        return True
+
+    # Mismo día: comprobar si ya se ejecutó en esta sesión
+    last_t = last_local.hour * 60 + last_local.minute
+    morning_start = _MACRO_MORNING_WINDOW[0] * 60 + _MACRO_MORNING_WINDOW[1]
+    morning_end = _MACRO_MORNING_WINDOW[2] * 60 + _MACRO_MORNING_WINDOW[3]
+
+    if session == "apertura":
+        # Ya se ejecutó en la ventana de mañana hoy?
+        return not (morning_start <= last_t <= morning_end)
+    else:  # cierre
+        # Ya se ejecutó en la ventana de tarde hoy?
+        evening_start = _MACRO_EVENING_WINDOW[0] * 60 + _MACRO_EVENING_WINDOW[1]
+        evening_end = _MACRO_EVENING_WINDOW[2] * 60 + _MACRO_EVENING_WINDOW[3]
+        return not (evening_start <= last_t <= evening_end)
 
 
 # ── Tareas automáticas ───────────────────────────────────────
@@ -251,18 +310,50 @@ async def _auto_scan(portfolio_id: int, mode: AutoModeType) -> None:
         logger.error(f"Error en auto_scan: {e}")
 
 
-async def _auto_macro(portfolio_id: int) -> None:
-    """Ejecuta análisis macro y guarda contexto."""
-    logger.info(f"🤖 [AUTO] Análisis macro para portfolio {portfolio_id}")
+async def _auto_macro(portfolio_id: int, session: str = "apertura") -> None:
+    """Ejecuta análisis macro profundo y guarda contexto.
+
+    Se ejecuta dos veces al día: pre-apertura (~7:30) y post-cierre (~18:00).
+    Genera un análisis detallado con contexto geopolítico, sectorial,
+    flujos de mercado y recomendaciones de exposición.
+    """
+    logger.info(f"🤖 [AUTO] Análisis macro profundo ({session}) para portfolio {portfolio_id}")
     try:
+        # Guardar contexto antes del análisis
         await save_context_snapshot()
 
-        macro = await get_macro_analysis()
+        # Obtener resumen del portfolio para contextualizar
+        portfolio_summary = None
+        try:
+            portfolio_summary = await get_portfolio_summary(portfolio_id)
+        except Exception:
+            pass
+
+        # Obtener estrategia activa
+        strategy = None
+        try:
+            portfolio = await repo.get_portfolio(portfolio_id)
+            if portfolio and portfolio.strategy:
+                strategy = portfolio.strategy.value if hasattr(portfolio.strategy, 'value') else str(portfolio.strategy)
+        except Exception:
+            pass
+
+        macro = await get_deep_macro_analysis(
+            strategy=strategy,
+            session=session,
+            portfolio_summary=portfolio_summary,
+        )
         if macro and "Error" not in macro:
-            text = "🤖 *MODO AUTO — Actualización Macro*\n\n" + macro
+            session_emoji = "🌅" if session == "apertura" else "🌆"
+            text = (
+                f"🤖 *MODO AUTO — Análisis Macro Profundo*\n"
+                f"{session_emoji} *Sesión de {session.upper()}*\n"
+                f"{'=' * 35}\n\n"
+                f"{macro}"
+            )
             await _notify(text)
     except Exception as e:
-        logger.error(f"Error en auto_macro: {e}")
+        logger.error(f"Error en auto_macro ({session}): {e}")
 
 
 async def _auto_analyze_positions(portfolio_id: int, config) -> None:

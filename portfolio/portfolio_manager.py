@@ -282,8 +282,8 @@ async def execute_sell(
                 total_dividends = await repo.get_total_dividends(
                     portfolio_id, ticker=ticker
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error obteniendo dividendos de {ticker}: {e}")
 
             # Contexto de mercado al momento de la entrada
             market_ctx = None
@@ -292,8 +292,8 @@ async def execute_sell(
                     ctx = await repo.get_market_context_near_date(position.opened_at)
                     if ctx:
                         market_ctx = ctx.summary[:300]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error obteniendo contexto de mercado para {ticker}: {e}")
 
             # Indicadores técnicos actuales (momento de venta)
             entry_rsi = None
@@ -304,8 +304,8 @@ async def execute_sell(
                 if ti:
                     entry_rsi = ti.rsi
                     entry_macd_signal = ti.signal if hasattr(ti, "signal") else None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error obteniendo técnicos de {ticker}: {e}")
 
             # Score de señal al momento de compra
             entry_score = None
@@ -313,8 +313,8 @@ async def execute_sell(
                 analysis = await repo.get_latest_analysis(ticker)
                 if analysis:
                     entry_score = analysis.overall_score
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error obteniendo score previo de {ticker}: {e}")
 
             # Score de diversificación
             div_score = None
@@ -322,10 +322,10 @@ async def execute_sell(
                 from strategy.correlation import portfolio_correlation
                 positions_all = list(await repo.get_open_positions(portfolio_id))
                 if len(positions_all) >= 2:
-                    corr_result = await portfolio_correlation(positions_all)
+                    corr_result = await portfolio_correlation(portfolio_id)
                     div_score = corr_result.get("diversification_score")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error calculando diversificación para {ticker}: {e}")
 
             # Régimen de mercado
             market_regime = None
@@ -339,8 +339,8 @@ async def execute_sell(
                         market_regime = "greed"
                     else:
                         market_regime = "neutral"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error obteniendo régimen de mercado para {ticker}: {e}")
 
             # Determinar origin de la operación
             origin_str = origin.value if origin else "manual"
@@ -350,8 +350,8 @@ async def execute_sell(
             try:
                 strategy_obj = await repo.get_portfolio_strategy(portfolio_id)
                 strategy_used = strategy_obj.value if strategy_obj else None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error obteniendo estrategia del portfolio: {e}")
 
             asyncio.create_task(
                 analyze_closed_trade(

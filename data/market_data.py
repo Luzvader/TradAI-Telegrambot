@@ -52,6 +52,41 @@ async def refresh_broker_prices() -> dict[str, float]:
         return {}
 
 
+# Mapeo de mercados a códigos exchange_calendars
+_EXCHANGE_CAL_MAP: dict[str, str] = {
+    "NASDAQ": "XNYS",  # exchange_calendars usa XNYS para US
+    "NYSE": "XNYS",
+    "IBEX": "XMAD",
+    "LSE": "XLON",
+    "XETRA": "XFRA",
+    "EURONEXT_PARIS": "XPAR",
+    "BORSA_ITALIANA": "XMIL",
+    "EURONEXT_AMSTERDAM": "XAMS",
+}
+
+
+def _is_holiday(market_key: str, local_date) -> bool:
+    """Comprueba si una fecha es festivo en el mercado dado.
+
+    Usa exchange_calendars si está disponible; de lo contrario
+    devuelve False (sin festivos = solo fin de semana).
+    """
+    try:
+        import exchange_calendars as xcals
+        import pandas as pd
+
+        exc_code = _EXCHANGE_CAL_MAP.get(market_key)
+        if exc_code:
+            cal = xcals.get_calendar(exc_code)
+            ts = pd.Timestamp(local_date)
+            return not cal.is_session(ts)
+    except ImportError:
+        pass  # exchange_calendars no instalado
+    except Exception:
+        pass  # Cualquier error, fallback
+    return False
+
+
 def is_market_open(market_key: str) -> bool:
     """Comprueba si el mercado está abierto ahora mismo (incluye festivos)."""
     schedule = MARKETS.get(market_key)
@@ -61,31 +96,8 @@ def is_market_open(market_key: str) -> bool:
     if now.weekday() not in schedule.trading_days:
         return False
 
-    # Comprobar festivos con exchange_calendars si está disponible
-    try:
-        import exchange_calendars as xcals
-        _exchange_map = {
-            "NASDAQ": "XNYS",  # exchange_calendars usa XNYS para US
-            "NYSE": "XNYS",
-            "IBEX": "XMAD",
-            "LSE": "XLON",
-            "XETRA": "XFRA",
-            "EURONEXT_PARIS": "XPAR",
-            "BORSA_ITALIANA": "XMIL",
-            "EURONEXT_AMSTERDAM": "XAMS",
-        }
-        exc_code = _exchange_map.get(market_key)
-        if exc_code:
-            cal = xcals.get_calendar(exc_code)
-            today = now.date()
-            import pandas as pd
-            ts = pd.Timestamp(today)
-            if not cal.is_session(ts):
-                return False
-    except ImportError:
-        pass  # exchange_calendars no instalado, solo usar día de semana
-    except Exception:
-        pass  # Cualquier error, fallback a solo día de semana
+    if _is_holiday(market_key, now.date()):
+        return False
 
     market_open = now.replace(
         hour=schedule.open_hour, minute=schedule.open_minute, second=0
@@ -94,6 +106,26 @@ def is_market_open(market_key: str) -> bool:
         hour=schedule.close_hour, minute=schedule.close_minute, second=0
     )
     return market_open <= now <= market_close
+
+
+def is_trading_day(market_key: str) -> bool:
+    """Comprueba si hoy es día de trading en el mercado (L-V + no festivo).
+
+    A diferencia de ``is_market_open``, NO comprueba la hora, solo la fecha.
+    Útil para decidir si lanzar tareas diarias (resumen, macro, etc.).
+    """
+    schedule = MARKETS.get(market_key)
+    if schedule is None:
+        return False
+    now = datetime.now(schedule.tz)
+    if now.weekday() not in schedule.trading_days:
+        return False
+    return not _is_holiday(market_key, now.date())
+
+
+def is_any_trading_day() -> bool:
+    """Devuelve True si hoy es día de trading en al menos un mercado."""
+    return any(is_trading_day(m) for m in MARKETS)
 
 
 def get_open_markets() -> list[str]:
