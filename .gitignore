@@ -215,3 +215,7 @@ options.xml
 
 # Environment files
 /frontend/.env*
+
+# OS / local junk
+.DS_Store
+coloclient.place_tr,

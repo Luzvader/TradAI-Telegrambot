@@ -4,16 +4,16 @@ services:
     container_name: tradai_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-tradai}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradai_password}
-      POSTGRES_DB: ${POSTGRES_DB:-tradai_db}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     # Exponer PostgreSQL al host para Alembic y desarrollo local
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tradai}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -28,7 +28,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-tradai}:${POSTGRES_PASSWORD:-tradai_password}@db:5432/${POSTGRES_DB:-tradai_db}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     ports:
       - "${WEB_PORT:-8080}:${WEB_PORT:-8080}"
     volumes:
