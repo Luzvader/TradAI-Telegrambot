@@ -80,10 +80,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/broker buscar TICKER — Buscar instrumento en T212\n"
         "/broker historial — Historial de órdenes\n"
         "/broker ordenes — Órdenes pendientes\n"
-        "/broker cancelar ID — Cancelar orden\n\n"
-        "*── Dashboard Web ──*\n"
-        "/web — Generar código de acceso al dashboard\n"
-        "  _Código de un solo uso, sesión de 24h_\n"
+        "/broker cancelar ID — Cancelar orden\n"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 

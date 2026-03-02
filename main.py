@@ -14,7 +14,6 @@ import sys
 from logging.handlers import RotatingFileHandler
 
 from config.settings import LOG_DIR, LOG_LEVEL, validate_settings
-from config.settings import WEB_ENABLED, WEB_HOST, WEB_PORT
 from database.connection import close_db, init_db
 from portfolio.portfolio_manager import init_portfolios
 from scheduler.jobs import init_scheduler
@@ -117,35 +116,11 @@ async def main() -> None:
         sched = init_scheduler(telegram_bot=app.bot)
         sched.start()
 
-        # 5. Iniciar dashboard web
-        web_server = None
-        if WEB_ENABLED:
-            try:
-                import uvicorn
-                from web.app import app as web_app
-
-                config = uvicorn.Config(
-                    web_app,
-                    host=WEB_HOST,
-                    port=WEB_PORT,
-                    log_level="warning",
-                    access_log=False,
-                )
-                web_server = uvicorn.Server(config)
-                asyncio.create_task(web_server.serve())
-                logger.info(f"   🌐 Dashboard web: http://{WEB_HOST}:{WEB_PORT}")
-            except ImportError:
-                logger.warning("⚠️ uvicorn/fastapi no instalados — dashboard web desactivado")
-            except Exception as e:
-                logger.warning(f"⚠️ Error iniciando dashboard web: {e}")
-
         logger.info("=" * 60)
         logger.info("✅ TradAI operativo — esperando comandos e instrucciones")
         logger.info("   📱 Telegram: bot activo")
         logger.info(f"   ⏰ Scheduler: {len(sched.get_jobs())} tareas programadas")
         logger.info(f"   📊 Monitorización: cada 10 min en horario de mercado")
-        if WEB_ENABLED and web_server:
-            logger.info(f"   🌐 Dashboard: http://localhost:{WEB_PORT}")
         logger.info("=" * 60)
 
         # Notificar por Telegram que el bot ha arrancado

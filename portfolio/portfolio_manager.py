@@ -21,15 +21,20 @@ from config.settings import ACCOUNT_CURRENCY
 from data.fundamentals import get_sector
 from data.fx import get_fx_rate
 from data.market_data import get_prices_batch, refresh_broker_prices
+from database.connection import unit_of_work
 from database import repository as repo
 from database.models import (
     AssetType,
+    Operation,
     OperationOrigin,
     OperationSide,
     Portfolio,
     PortfolioType,
     Position,
+    PositionStatus,
 )
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from strategy.risk_manager import (
     RiskCheck,
     calculate_portfolio_value,
@@ -71,6 +76,7 @@ async def execute_buy(
     notes: str | None = None,
     origin: OperationOrigin = OperationOrigin.MANUAL,
     asset_type: AssetType | None = None,
+    skip_broker_execution: bool = False,
 ) -> dict[str, Any]:
     """
     Registra una operación de compra.
@@ -91,7 +97,7 @@ async def execute_buy(
 
     # ── Ejecutar primero en broker para cartera REAL ──
     broker_info = {}
-    if portfolio.portfolio_type == PortfolioType.REAL:
+    if portfolio.portfolio_type == PortfolioType.REAL and not skip_broker_execution:
         from config.settings import TRADING212_REQUIRE_EXECUTION
 
         try:
@@ -130,45 +136,105 @@ async def execute_buy(
                     "risk_warnings": risk.warnings,
                     **broker_info,
                 }
+    elif skip_broker_execution:
+        broker_info = {
+            "broker_executed": True,
+            "broker_note": "Compra ya ejecutada previamente en broker",
+        }
 
-    # Registrar operación
-    op = await repo.record_operation(
-        portfolio_id=portfolio_id,
-        ticker=ticker,
-        market=market,
-        side=OperationSide.BUY,
-        price=price,
-        amount_usd=amount_usd,
-        shares=shares,
-        notes=notes,
-        origin=origin,
-    )
+    # Persistir de forma atómica: operación + posición + cash
+    ticker_norm = ticker.upper()
+    market_input = (market or "NASDAQ").upper()
+    market_norm = "NASDAQ" if market_input in ("NASDAQ", "NYSE") else market_input
+    operation_id: int | None = None
+    for attempt in range(2):
+        try:
+            async with unit_of_work() as session:
+                locked_portfolio = await session.get(
+                    Portfolio, portfolio_id, with_for_update=True
+                )
+                if locked_portfolio is None:
+                    return {"success": False, "error": "Portfolio no encontrado"}
 
-    # Actualizar/crear posición
-    await repo.upsert_position(
-        portfolio_id=portfolio_id,
-        ticker=ticker,
-        market=market,
-        sector=sector,
-        shares=shares,
-        avg_price=price,
-        stop_loss=risk.suggested_stop_loss,
-        take_profit=risk.suggested_take_profit,
-        asset_type=asset_type,
-    )
+                stmt = (
+                    select(Position)
+                    .where(
+                        Position.portfolio_id == portfolio_id,
+                        Position.ticker == ticker_norm,
+                        Position.status == PositionStatus.OPEN,
+                    )
+                    .with_for_update()
+                )
+                if market_input in ("NASDAQ", "NYSE"):
+                    stmt = stmt.where(Position.market.in_(("NASDAQ", "NYSE")))
+                else:
+                    stmt = stmt.where(Position.market == market_norm)
 
-    # Descontar cash del portfolio
-    await repo.adjust_cash(portfolio_id, -amount_usd)
+                existing = (await session.execute(stmt)).scalars().first()
+                if existing is None:
+                    existing = Position(
+                        portfolio_id=portfolio_id,
+                        ticker=ticker_norm,
+                        market=market_norm,
+                        sector=sector,
+                        shares=shares,
+                        avg_price=price,
+                        stop_loss=risk.suggested_stop_loss,
+                        take_profit=risk.suggested_take_profit,
+                        asset_type=asset_type or AssetType.STOCK,
+                    )
+                    session.add(existing)
+                else:
+                    total_cost = existing.shares * existing.avg_price + shares * price
+                    new_shares = existing.shares + shares
+                    existing.shares = new_shares
+                    existing.avg_price = total_cost / new_shares if new_shares > 0 else price
+                    if risk.suggested_stop_loss is not None:
+                        existing.stop_loss = risk.suggested_stop_loss
+                    if risk.suggested_take_profit is not None:
+                        existing.take_profit = risk.suggested_take_profit
+                    if sector and (existing.sector is None or existing.sector == "N/A"):
+                        existing.sector = sector
+                    if asset_type is not None:
+                        existing.asset_type = asset_type
+
+                op = Operation(
+                    portfolio_id=portfolio_id,
+                    ticker=ticker_norm,
+                    market=market_norm,
+                    side=OperationSide.BUY,
+                    price=price,
+                    amount_usd=amount_usd,
+                    shares=shares,
+                    notes=notes,
+                    origin=origin,
+                )
+                session.add(op)
+
+                locked_portfolio.cash = (locked_portfolio.cash or 0) - amount_usd
+                await session.flush()
+                operation_id = op.id
+            break
+        except IntegrityError as e:
+            if attempt == 1:
+                logger.error(f"Error persistiendo BUY {ticker_norm}: {e}")
+                return {
+                    "success": False,
+                    "error": "Error de concurrencia al registrar la compra",
+                    "risk_warnings": risk.warnings,
+                    **broker_info,
+                }
+            logger.warning(f"Retry BUY por conflicto concurrente ({ticker_norm})")
 
     logger.info(
-        f"🟢 BUY {ticker}: {shares:.4f} acciones a {format_price(price, MARKET_CURRENCY.get(market, 'USD'))} "
-        f"(total: {format_price(amount_usd, MARKET_CURRENCY.get(market, 'USD'))})"
+        f"🟢 BUY {ticker_norm}: {shares:.4f} acciones a {format_price(price, MARKET_CURRENCY.get(market_norm, 'USD'))} "
+        f"(total: {format_price(amount_usd, MARKET_CURRENCY.get(market_norm, 'USD'))})"
     )
 
     return {
         "success": True,
-        "operation_id": op.id,
-        "ticker": ticker,
+        "operation_id": operation_id,
+        "ticker": ticker_norm,
         "shares": shares,
         "price": price,
         "amount": amount_usd,
@@ -283,9 +349,12 @@ async def execute_sell(
     if portfolio is None:
         return {"success": False, "error": "Portfolio no encontrado"}
 
-    position = await repo.get_position_by_ticker(portfolio_id, ticker, market=market)
+    ticker_norm = ticker.upper()
+    market_input = (market or "NASDAQ").upper()
+    market_norm = "NASDAQ" if market_input in ("NASDAQ", "NYSE") else market_input
+    position = await repo.get_position_by_ticker(portfolio_id, ticker_norm, market=market_norm)
     if position is None:
-        return {"success": False, "error": f"No hay posición abierta en {ticker}"}
+        return {"success": False, "error": f"No hay posición abierta en {ticker_norm}"}
 
     shares = min(shares_to_sell, position.shares)
     amount = round(shares * price, 2)
@@ -297,7 +366,7 @@ async def execute_sell(
 
         try:
             from broker.bridge import broker_sell
-            broker_result = await broker_sell(ticker, shares, price)
+            broker_result = await broker_sell(ticker_norm, shares, price)
             if broker_result.success:
                 order = broker_result.data
                 if order is not None:
@@ -332,42 +401,86 @@ async def execute_sell(
                     **broker_info,
                 }
 
-    # Registrar operación
-    op = await repo.record_operation(
-        portfolio_id=portfolio_id,
-        ticker=ticker,
-        market=market,
-        side=OperationSide.SELL,
-        price=price,
-        amount_usd=amount,
-        shares=shares,
-        notes=notes,
-        origin=origin,
-    )
+    # Persistir de forma atómica: operación + posición + cash
+    operation_id: int | None = None
+    is_closing = False
+    position_avg_price = position.avg_price
+    position_opened_at = position.opened_at
+    for attempt in range(2):
+        try:
+            async with unit_of_work() as session:
+                locked_portfolio = await session.get(
+                    Portfolio, portfolio_id, with_for_update=True
+                )
+                if locked_portfolio is None:
+                    return {"success": False, "error": "Portfolio no encontrado"}
 
-    # Actualizar posición
-    remaining = position.shares - shares
-    is_closing = remaining <= 0.0001
-    if is_closing:
-        await repo.close_position(position.id)
-    else:
-        await repo.upsert_position(
-            portfolio_id=portfolio_id,
-            ticker=ticker,
-            market=market,
-            sector=position.sector,
-            shares=-shares,
-            avg_price=position.avg_price,
-        )
+                stmt = (
+                    select(Position)
+                    .where(
+                        Position.portfolio_id == portfolio_id,
+                        Position.ticker == ticker_norm,
+                        Position.status == PositionStatus.OPEN,
+                    )
+                    .with_for_update()
+                )
+                if market_input in ("NASDAQ", "NYSE"):
+                    stmt = stmt.where(Position.market.in_(("NASDAQ", "NYSE")))
+                else:
+                    stmt = stmt.where(Position.market == market_norm)
 
-    # Sumar cash al portfolio
-    await repo.adjust_cash(portfolio_id, amount)
+                locked_position = (await session.execute(stmt)).scalars().first()
+                if locked_position is None:
+                    return {
+                        "success": False,
+                        "error": f"No hay posición abierta en {ticker_norm}",
+                    }
 
-    pnl = (price - position.avg_price) * shares
-    pnl_pct = ((price - position.avg_price) / position.avg_price * 100) if position.avg_price > 0 else 0
+                shares = min(shares, locked_position.shares)
+                amount = round(shares * price, 2)
+                position_avg_price = locked_position.avg_price
+                position_opened_at = locked_position.opened_at
+
+                op = Operation(
+                    portfolio_id=portfolio_id,
+                    ticker=ticker_norm,
+                    market=market_norm,
+                    side=OperationSide.SELL,
+                    price=price,
+                    amount_usd=amount,
+                    shares=shares,
+                    notes=notes,
+                    origin=origin,
+                )
+                session.add(op)
+
+                remaining = locked_position.shares - shares
+                is_closing = remaining <= 0.0001
+                if is_closing:
+                    locked_position.status = PositionStatus.CLOSED
+                    locked_position.closed_at = datetime.now(UTC)
+                else:
+                    locked_position.shares = remaining
+
+                locked_portfolio.cash = (locked_portfolio.cash or 0) + amount
+                await session.flush()
+                operation_id = op.id
+            break
+        except IntegrityError as e:
+            if attempt == 1:
+                logger.error(f"Error persistiendo SELL {ticker_norm}: {e}")
+                return {
+                    "success": False,
+                    "error": "Error de concurrencia al registrar la venta",
+                    **broker_info,
+                }
+            logger.warning(f"Retry SELL por conflicto concurrente ({ticker_norm})")
+
+    pnl = (price - position_avg_price) * shares
+    pnl_pct = ((price - position_avg_price) / position_avg_price * 100) if position_avg_price > 0 else 0
 
     logger.info(
-        f"🔴 SELL {ticker}: {shares:.4f} acciones a {format_price(price, MARKET_CURRENCY.get(market, 'USD'))} "
+        f"🔴 SELL {ticker_norm}: {shares:.4f} acciones a {format_price(price, MARKET_CURRENCY.get(market_norm, 'USD'))} "
         f"(PnL: {pnl:+.2f} / {pnl_pct:+.1f}%)"
     )
 
@@ -375,48 +488,48 @@ async def execute_sell(
     if is_closing:
         try:
             from ai.learning import analyze_closed_trade
-            holding_days = (datetime.now(UTC) - position.opened_at).days if position.opened_at else 0
+            holding_days = (datetime.now(UTC) - position_opened_at).days if position_opened_at else 0
 
             # ── Recopilar contexto enriquecido para el aprendizaje ──
             # Dividendos cobrados durante la posición
             total_dividends = 0.0
             try:
                 total_dividends = await repo.get_total_dividends(
-                    portfolio_id, ticker=ticker
+                    portfolio_id, ticker=ticker_norm
                 )
             except Exception as e:
-                logger.debug(f"Error obteniendo dividendos de {ticker}: {e}")
+                logger.debug(f"Error obteniendo dividendos de {ticker_norm}: {e}")
 
             # Contexto de mercado al momento de la entrada
             market_ctx = None
             try:
-                if position.opened_at:
-                    ctx = await repo.get_market_context_near_date(position.opened_at)
+                if position_opened_at:
+                    ctx = await repo.get_market_context_near_date(position_opened_at)
                     if ctx:
                         market_ctx = ctx.summary[:300]
             except Exception as e:
-                logger.debug(f"Error obteniendo contexto de mercado para {ticker}: {e}")
+                logger.debug(f"Error obteniendo contexto de mercado para {ticker_norm}: {e}")
 
             # Indicadores técnicos actuales (momento de venta)
             entry_rsi = None
             entry_macd_signal = None
             try:
                 from data.technical import get_technical_analysis
-                ti = await get_technical_analysis(ticker, market)
+                ti = await get_technical_analysis(ticker_norm, market_norm)
                 if ti:
                     entry_rsi = ti.rsi
                     entry_macd_signal = ti.signal if hasattr(ti, "signal") else None
             except Exception as e:
-                logger.debug(f"Error obteniendo técnicos de {ticker}: {e}")
+                logger.debug(f"Error obteniendo técnicos de {ticker_norm}: {e}")
 
             # Score de señal al momento de compra
             entry_score = None
             try:
-                analysis = await repo.get_latest_analysis(ticker)
+                analysis = await repo.get_latest_analysis(ticker_norm)
                 if analysis:
                     entry_score = analysis.overall_score
             except Exception as e:
-                logger.debug(f"Error obteniendo score previo de {ticker}: {e}")
+                logger.debug(f"Error obteniendo score previo de {ticker_norm}: {e}")
 
             # Score de diversificación
             div_score = None
@@ -427,7 +540,7 @@ async def execute_sell(
                     corr_result = await portfolio_correlation(portfolio_id)
                     div_score = corr_result.get("diversification_score")
             except Exception as e:
-                logger.debug(f"Error calculando diversificación para {ticker}: {e}")
+                logger.debug(f"Error calculando diversificación para {ticker_norm}: {e}")
 
             # Régimen de mercado
             market_regime = None
@@ -442,7 +555,7 @@ async def execute_sell(
                     else:
                         market_regime = "neutral"
             except Exception as e:
-                logger.debug(f"Error obteniendo régimen de mercado para {ticker}: {e}")
+                logger.debug(f"Error obteniendo régimen de mercado para {ticker_norm}: {e}")
 
             # Determinar origin de la operación
             origin_str = origin.value if origin else "manual"
@@ -457,9 +570,9 @@ async def execute_sell(
 
             asyncio.create_task(
                 analyze_closed_trade(
-                    ticker=ticker,
+                    ticker=ticker_norm,
                     side="SELL",
-                    entry_price=position.avg_price,
+                    entry_price=position_avg_price,
                     exit_price=price,
                     holding_days=holding_days,
                     market_context=market_ctx,
@@ -474,14 +587,14 @@ async def execute_sell(
                     market_regime=market_regime,
                 )
             )
-            logger.info(f"🧠 Análisis de aprendizaje lanzado para {ticker} (contexto enriquecido)")
+            logger.info(f"🧠 Análisis de aprendizaje lanzado para {ticker_norm} (contexto enriquecido)")
         except Exception as e:
-            logger.warning(f"Error lanzando aprendizaje para {ticker}: {e}")
+            logger.warning(f"Error lanzando aprendizaje para {ticker_norm}: {e}")
 
     return {
         "success": True,
-        "operation_id": op.id,
-        "ticker": ticker,
+        "operation_id": operation_id,
+        "ticker": ticker_norm,
         "shares_sold": shares,
         "price": price,
         "amount": amount,

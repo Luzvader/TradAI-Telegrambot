@@ -33,11 +33,6 @@ html5lib>=1.1
 # Calendario de festivos (opcional pero recomendado)
 exchange_calendars>=4.5
 
-# Dashboard web
-fastapi>=0.110
-uvicorn[standard]>=0.29
-jinja2>=3.1
-
 # Migraciones
 alembic>=1.13
 

@@ -2,9 +2,6 @@
 Tests para config/settings.py — verificar carga de configuración.
 """
 
-import os
-
-
 def test_settings_import():
     """Asegurar que settings se importa sin errores."""
     from config import settings
@@ -21,13 +18,6 @@ def test_signal_thresholds():
 def test_scan_min_score():
     from config.settings import SCAN_MIN_SCORE
     assert 0 <= SCAN_MIN_SCORE <= 100
-
-
-def test_web_config():
-    from config.settings import WEB_ENABLED, WEB_PORT
-    assert isinstance(WEB_ENABLED, bool)
-    assert isinstance(WEB_PORT, int)
-    assert WEB_PORT > 0
 
 
 def test_get_int_helper():

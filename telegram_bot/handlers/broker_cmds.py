@@ -308,12 +308,57 @@ async def _broker_history(update: Update) -> None:
 
     lines = ["📜 *Historial de órdenes recientes*\n"]
     for order in (items[:15] if isinstance(items, list) else []):
-        ticker = order.get("ticker", "?")
-        side = "🟢 BUY" if order.get("quantity", 0) > 0 else "🔴 SELL"
-        qty = abs(order.get("filledQuantity", order.get("quantity", 0)))
-        value = order.get("filledValue", order.get("value", 0))
-        status = order.get("status", "?")
-        date = order.get("createdAt", "")[:10]
+        # /history/orders devuelve items con shape {"order": {...}, "fill": {...}}
+        # pero mantenemos compatibilidad con payload plano por robustez.
+        order_data = order.get("order", order) if isinstance(order, dict) else {}
+        fill_data = order.get("fill", {}) if isinstance(order, dict) else {}
+        if not isinstance(order_data, dict):
+            continue
+
+        instrument = order_data.get("instrument", {})
+        ticker_raw = order_data.get("ticker") or (
+            instrument.get("ticker", "?") if isinstance(instrument, dict) else "?"
+        )
+        ticker = client._clean_ticker(str(ticker_raw))
+
+        side_value = str(order_data.get("side", "BUY")).upper()
+        side = "🟢 BUY" if side_value == "BUY" else "🔴 SELL"
+
+        qty_raw = (
+            fill_data.get("quantity")
+            if isinstance(fill_data, dict) and fill_data.get("quantity") is not None
+            else order_data.get("filledQuantity", order_data.get("quantity", 0))
+        )
+        try:
+            qty = abs(float(qty_raw or 0))
+        except (TypeError, ValueError):
+            qty = 0.0
+
+        fill_price = (
+            fill_data.get("price") if isinstance(fill_data, dict) else None
+        )
+        try:
+            fill_price = float(fill_price) if fill_price is not None else None
+        except (TypeError, ValueError):
+            fill_price = None
+
+        value_raw = order_data.get("filledValue", order_data.get("value"))
+        try:
+            value = float(value_raw) if value_raw is not None else 0.0
+        except (TypeError, ValueError):
+            value = 0.0
+
+        if value == 0.0 and fill_price is not None and qty > 0:
+            value = fill_price * qty
+
+        status = order_data.get("status", "?")
+        date_value = (
+            fill_data.get("filledAt")
+            if isinstance(fill_data, dict) and fill_data.get("filledAt")
+            else order_data.get("createdAt", "")
+        )
+        date = str(date_value)[:10]
+
         lines.append(
             f"  {side} *{ticker}*: {qty:.2f} acc | "
             f"{value:.2f}$ | {status} | {date}"

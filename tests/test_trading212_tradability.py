@@ -4,6 +4,7 @@ import pytest
 
 from broker.base import BrokerResult
 from broker import bridge
+from broker import trading212
 
 
 class _MarketAwareClient:
@@ -96,3 +97,35 @@ async def test_tradability_refreshes_catalog_once_on_miss(monkeypatch):
     assert result["instrument_ticker"] == "ITX_ES_EQ"
     assert result_cached["tradable"] is True
     assert client.refresh_calls == 1
+
+
+def test_init_from_credentials_respects_primary_mode_demo():
+    trading212._clients.clear()
+    trading212._default_mode = "live"
+
+    creds = {
+        "demo": ("demo_key", "demo_secret"),
+        "live": ("live_key", "live_secret"),
+    }
+    trading212.init_trading212_from_credentials(creds, primary_mode="demo")
+
+    default_client = trading212.get_trading212_client()
+    assert default_client is not None
+    assert default_client.mode == "demo"
+    trading212._clients.clear()
+
+
+def test_init_from_credentials_respects_primary_mode_live():
+    trading212._clients.clear()
+    trading212._default_mode = "demo"
+
+    creds = {
+        "demo": ("demo_key", "demo_secret"),
+        "live": ("live_key", "live_secret"),
+    }
+    trading212.init_trading212_from_credentials(creds, primary_mode="live")
+
+    default_client = trading212.get_trading212_client()
+    assert default_client is not None
+    assert default_client.mode == "live"
+    trading212._clients.clear()

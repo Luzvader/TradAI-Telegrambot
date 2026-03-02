@@ -6,7 +6,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Optional, Sequence
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 
 from database.connection import async_session_factory
 from database.models import (
@@ -91,7 +92,7 @@ async def get_position_by_ticker(
             else:
                 stmt = stmt.where(Position.market == mk)
         result = await session.execute(stmt)
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
 
 async def upsert_position(
@@ -105,52 +106,74 @@ async def upsert_position(
     take_profit: float | None = None,
     asset_type: AssetType | None = None,
 ) -> Position:
-    async with async_session_factory() as session:
-        market_norm = (market or "NASDAQ").upper()
-        stmt = select(Position).where(
-            Position.portfolio_id == portfolio_id,
-            Position.ticker == ticker.upper(),
-            Position.status == PositionStatus.OPEN,
-        )
-        if market_norm in ("NASDAQ", "NYSE"):
-            stmt = stmt.where(Position.market.in_(("NASDAQ", "NYSE")))
-        else:
-            stmt = stmt.where(Position.market == market_norm)
-        result = await session.execute(stmt)
-        pos = result.scalar_one_or_none()
+    market_input = (market or "NASDAQ").upper()
+    market_norm = "NASDAQ" if market_input in ("NASDAQ", "NYSE") else market_input
+    ticker_norm = ticker.upper()
 
-        if pos is None:
-            pos = Position(
-                portfolio_id=portfolio_id,
-                ticker=ticker.upper(),
-                market=market_norm,
-                sector=sector,
-                shares=shares,
-                avg_price=avg_price,
-                stop_loss=stop_loss,
-                take_profit=take_profit,
-                asset_type=asset_type or AssetType.STOCK,
+    for attempt in range(2):
+        async with async_session_factory() as session:
+            stmt = (
+                select(Position)
+                .where(
+                    Position.portfolio_id == portfolio_id,
+                    Position.ticker == ticker_norm,
+                    Position.status == PositionStatus.OPEN,
+                )
+                .with_for_update()
             )
-            session.add(pos)
-        else:
-            # Actualizar media ponderada
-            total_cost = pos.shares * pos.avg_price + shares * avg_price
-            pos.shares += shares
-            pos.avg_price = total_cost / pos.shares if pos.shares > 0 else 0
-            if stop_loss is not None:
-                pos.stop_loss = stop_loss
-            if take_profit is not None:
-                pos.take_profit = take_profit
-            # Actualizar sector si estaba vacío
-            if sector and (pos.sector is None or pos.sector == "N/A"):
-                pos.sector = sector
-            # Actualizar asset_type si se proporcionó y no se había establecido
-            if asset_type is not None:
-                pos.asset_type = asset_type
+            if market_input in ("NASDAQ", "NYSE"):
+                stmt = stmt.where(Position.market.in_(("NASDAQ", "NYSE")))
+            else:
+                stmt = stmt.where(Position.market == market_norm)
 
-        await session.commit()
-        await session.refresh(pos)
-        return pos
+            result = await session.execute(stmt)
+            pos = result.scalars().first()
+
+            if pos is None:
+                pos = Position(
+                    portfolio_id=portfolio_id,
+                    ticker=ticker_norm,
+                    market=market_norm,
+                    sector=sector,
+                    shares=shares,
+                    avg_price=avg_price,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    asset_type=asset_type or AssetType.STOCK,
+                )
+                session.add(pos)
+            else:
+                # Normalizar mercado US para evitar duplicados NASDAQ/NYSE.
+                if pos.market in ("NASDAQ", "NYSE"):
+                    pos.market = market_norm
+                # Actualizar media ponderada
+                total_cost = pos.shares * pos.avg_price + shares * avg_price
+                pos.shares += shares
+                pos.avg_price = total_cost / pos.shares if pos.shares > 0 else 0
+                if stop_loss is not None:
+                    pos.stop_loss = stop_loss
+                if take_profit is not None:
+                    pos.take_profit = take_profit
+                # Actualizar sector si estaba vacío
+                if sector and (pos.sector is None or pos.sector == "N/A"):
+                    pos.sector = sector
+                # Actualizar asset_type si se proporcionó y no se había establecido
+                if asset_type is not None:
+                    pos.asset_type = asset_type
+
+            try:
+                await session.commit()
+                await session.refresh(pos)
+                return pos
+            except IntegrityError:
+                await session.rollback()
+                if attempt == 1:
+                    raise
+                logger.warning(
+                    f"Retry upsert_position por conflicto concurrente: {ticker_norm}"
+                )
+
+    raise RuntimeError("upsert_position failed unexpectedly")
 
 
 async def close_position(position_id: int) -> None:
@@ -300,12 +323,16 @@ async def set_initial_capital_only(portfolio_id: int, capital: float) -> None:
 async def adjust_cash(portfolio_id: int, delta: float) -> float:
     """Ajusta el cash (positivo = entrada, negativo = salida). Devuelve nuevo cash."""
     async with async_session_factory() as session:
-        portfolio = await session.get(Portfolio, portfolio_id)
-        if portfolio is None:
-            return 0
-        portfolio.cash = (portfolio.cash or 0) + delta
+        stmt = (
+            update(Portfolio)
+            .where(Portfolio.id == portfolio_id)
+            .values(cash=func.coalesce(Portfolio.cash, 0.0) + delta)
+            .returning(Portfolio.cash)
+        )
+        result = await session.execute(stmt)
         await session.commit()
-        return portfolio.cash
+        new_cash = result.scalar_one_or_none()
+        return float(new_cash) if new_cash is not None else 0.0
 
 
 async def set_cash(portfolio_id: int, amount: float) -> float:

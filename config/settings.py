@@ -92,11 +92,6 @@ SCAN_MIN_SCORE: float = _get_float("SCAN_MIN_SCORE", 65.0)
 # Se auto-detecta del broker si no se establece manualmente.
 ACCOUNT_CURRENCY: str = os.getenv("ACCOUNT_CURRENCY", "EUR")
 
-# ── Web Dashboard ────────────────────────────────────────────
-WEB_ENABLED: bool = _get_bool("WEB_ENABLED", True)
-WEB_PORT: int = _get_int("WEB_PORT", 8080)
-WEB_HOST: str = os.getenv("WEB_HOST", "0.0.0.0")
-WEB_DOMAIN: str = os.getenv("WEB_DOMAIN", "")  # ej: "123.45.67.89" o "mi-vps.com"
 # ── Trading212 Broker ────────────────────────────────────────
 # Credenciales principales (aplican al modo por defecto TRADING212_MODE)
 TRADING212_API_KEY: str = os.getenv("TRADING212_API_KEY", "")

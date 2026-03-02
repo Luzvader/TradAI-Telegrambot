@@ -34,7 +34,6 @@ y TradAI mantiene sincronía para análisis, señales y aprendizaje.
 | **Objetivos de Inversión** | Tesis, catalizadores, riesgos, precios objetivo y convicción por empresa |
 | **Calendario Earnings** | Monitorización automática de resultados, alertas ≤7 días, análisis pre-earnings |
 | **Coste OpenAI** | Tracking real de tokens, costes por modelo y rate limiting configurable |
-| **Dashboard Web** | Panel web con resumen de portfolio, posiciones, señales y métricas (FastAPI + htmx) |
 | **Confirmaciones** | Botones inline para confirmar compras/ventas |
 | **Telegram** | 24 comandos para administración completa |
 | **Multi-mercado** | NASDAQ, NYSE, IBEX 35, DAX, CAC 40, FTSE MIB, FTSE 100, AEX con horarios y festivos |
@@ -63,13 +62,13 @@ conectando datos de múltiples subsistemas para que la IA aprenda de su propia o
 
 ```
 TradAI/
-├── main.py                    # Punto de entrada (Telegram + Scheduler + Web)
+├── main.py                    # Punto de entrada (Telegram + Scheduler)
 ├── config/
 │   ├── settings.py            # Configuración central desde .env
 │   └── markets.py             # Horarios de mercado y mapping tickers
 ├── database/
 │   ├── connection.py          # Conexión async PostgreSQL + Unit of Work
-│   ├── models.py              # 15 modelos SQLAlchemy + 9 enums
+│   ├── models.py              # 16 modelos SQLAlchemy + 10 enums
 │   ├── repository.py          # Façade re-exportadora
 │   └── repos/                 # Sub-módulos CRUD por dominio
 │       ├── portfolio.py       # Portfolio, Position, Operation (con origin tracking)
@@ -121,12 +120,6 @@ TradAI/
 │   └── trading212.py          # Implementación Trading212 API
 ├── notifications/
 │   └── __init__.py            # Sistema centralizado de notificaciones Telegram
-├── web/
-│   ├── app.py                 # Aplicación FastAPI
-│   ├── auth.py                # Autenticación web (TOTP)
-│   ├── routes.py              # Rutas web + API JSON
-│   ├── templates/             # Templates Jinja2 + htmx
-│   └── static/                # CSS
 ├── telegram_bot/
 │   ├── bot.py                 # Configuración del bot + inline keyboards
 │   ├── decorators.py          # Decoradores de autorización
@@ -139,7 +132,6 @@ TradAI/
 │       ├── watchlist_cmds.py  # Watchlist IA
 │       ├── objective_cmds.py  # Objetivos de inversión
 │       ├── earnings_cmds.py   # Calendario de earnings
-│       ├── web_cmds.py        # Dashboard web
 │       ├── system_cmds.py     # Help, costes
 │       ├── callbacks.py       # Botones inline (confirmaciones)
 │       ├── helpers.py         # Utilidades compartidas
@@ -152,7 +144,7 @@ TradAI/
 │   └── versions/              # Archivos de migraciones
 ├── tests/                     # Suite de tests (pytest)
 ├── Dockerfile                 # Multi-stage build optimizado
-└── docker-compose.yml         # PostgreSQL + App + Web dashboard
+└── docker-compose.yml         # PostgreSQL + App
 ```
 
 ## 🚀 Instalación
@@ -208,7 +200,7 @@ python main.py
 ### Operaciones (con confirmación inline)
 | Comando | Ejemplo |
 |---|---|
-| `/buy TICKER CANTIDAD PRECIO` | `/buy AAPL 10 185.50` |
+| `/buy TICKER CANTIDAD [PRECIO]` | `/buy AAPL 10` o `/buy AAPL 10 185.50` |
 | `/sell TICKER CANTIDAD PRECIO` | `/sell AAPL 5 200.00` |
 
 ### Broker
@@ -262,7 +254,6 @@ python main.py
 | `/auto on\|off\|safe` | Activar / desactivar / modo seguro |
 | `/auto scan\|analyze\|summary ...` | Configurar intervalos y horarios |
 | `/costes` | Uso y costes estimados de OpenAI |
-| `/web` | Código de acceso al dashboard web |
 | `/help` | Ayuda y lista de comandos |
 
 ## 🛡️ Gestión de Riesgos
@@ -321,7 +312,7 @@ Los horarios de mercado se gestionan automáticamente con soporte de festivos:
 - **FTSE 100 (LSE)**: 8:00 – 16:30 (GMT)
 - **AEX (Euronext Amsterdam)**: 9:00 – 17:30 (CET)
 
-## 🗄️ Modelos de Datos (15 modelos + 9 enums)
+## 🗄️ Modelos de Datos (16 modelos + 10 enums)
 
 | Modelo | Propósito |
 |---|---|
@@ -340,36 +331,21 @@ Los horarios de mercado se gestionan automáticamente con soporte de festivos:
 | `OpenAIUsage` | Tracking de tokens y costes por modelo |
 | `AnalysisLog` | Análisis completos persistidos (analizar, scan, auto-scan) |
 | `InvestmentObjective` | Objetivos de inversión con tesis y catalizadores |
+| `PendingLimitOrder` | Órdenes límite pendientes con expiración y reconciliación broker/local |
 
-Enums: `PortfolioType`, `OperationSide`, `SignalType`, `PositionStatus`, `WatchlistStatus`, `AssetType`, `AutoModeType`, `OperationOrigin`, `StrategyType`.
+Enums: `PortfolioType`, `OperationSide`, `SignalType`, `PositionStatus`, `WatchlistStatus`, `AssetType`, `AutoModeType`, `OperationOrigin`, `StrategyType`, `PendingLimitOrderStatus`.
 
 ## 📊 Stack Tecnológico
 
 - **Python 3.12+**
 - **PostgreSQL 16** (con SQLAlchemy 2.x async + Alembic)
 - **python-telegram-bot 21+** (bot de Telegram con inline keyboards)
-- **FastAPI + Jinja2 + htmx** (dashboard web)
 - **yfinance** (datos de mercado y precios)
 - **OpenAI** (análisis IA con prompts adaptados por estrategia + rate limiting)
 - **APScheduler** (tareas programadas)
 - **exchange_calendars** (festivos de mercado)
 - **Docker Compose** (despliegue con multi-stage build)
 - **pytest** (tests unitarios)
-
-## 🌐 Dashboard Web
-
-TradAI incluye un dashboard web accesible en `http://localhost:8080` (configurable):
-
-- **KPIs**: Valor total, P&L, posiciones, señales 30d, coste OpenAI
-- **Posiciones**: Tabla con P&L individual, sector, precio medio/actual
-- **Señales**: Últimas señales con tipo (BUY/SELL/HOLD), score y detalle
-- **Auto-refresh**: Actualización automática cada 60 segundos
-- **API JSON**: Endpoints `/api/portfolio`, `/api/signals`, `/api/openai-usage`, `/api/health`
-
-Variables de configuración:
-- `WEB_ENABLED` — Activar/desactivar (default: `true`)
-- `WEB_PORT` — Puerto (default: `8080`)
-- `WEB_HOST` — Interfaz (default: `0.0.0.0`)
 
 ## 📄 Licencia
 

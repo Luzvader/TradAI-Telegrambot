@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -128,6 +129,14 @@ class Position(Base):
     __table_args__ = (
         Index("ix_positions_portfolio_status", "portfolio_id", "status"),
         Index("ix_positions_ticker", "ticker"),
+        Index(
+            "uq_positions_open_portfolio_ticker_market",
+            "portfolio_id",
+            "ticker",
+            "market",
+            unique=True,
+            postgresql_where=text("status = 'open'"),
+        ),
     )
 
 

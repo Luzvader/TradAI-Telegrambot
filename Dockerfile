@@ -26,7 +26,4 @@ COPY --from=builder /install /usr/local
 
 COPY . .
 
-# Puerto del dashboard web
-EXPOSE ${WEB_PORT:-8080}
-
 CMD ["python", "main.py"]

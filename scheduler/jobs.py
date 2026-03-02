@@ -1028,8 +1028,20 @@ async def job_check_pending_limit_orders() -> None:
                     client = get_trading212_client()
                     if client:
                         result = await client.get_order_by_id(order.broker_order_id)
-                        if result.success and result.data:
-                            t212_order = result.data
+
+                        t212_order = result.data if result.success and result.data else None
+                        # /equity/orders/{id} solo contempla órdenes pendientes.
+                        # Si devuelve 404, buscar en histórico para capturar FILLED.
+                        if t212_order is None and (
+                            not result.success and "HTTP 404" in (result.error or "")
+                        ):
+                            history_result = await client.get_historical_order_by_id(
+                                order.broker_order_id
+                            )
+                            if history_result.success and history_result.data:
+                                t212_order = history_result.data
+
+                        if t212_order:
                             status = getattr(t212_order, "status", "").upper()
                             if status in ("FILLED", "EXECUTED"):
                                 filled = True
@@ -1062,8 +1074,16 @@ async def job_check_pending_limit_orders() -> None:
                     price=filled_price or order.limit_price,
                     shares=order.shares,
                     asset_type=_asset_type,
-                    origin=OperationOrigin.MANUAL,
+                    origin=OperationOrigin.IMPORT,
+                    skip_broker_execution=True,
                 )
+                if not buy_result.get("success"):
+                    logger.error(
+                        f"❌ Error registrando limit order ejecutada en local "
+                        f"(id={order.id}, ticker={order.ticker}): {buy_result.get('error')}"
+                    )
+                    continue
+
                 await repo.mark_limit_order_filled(order.id, filled_price=filled_price)
 
                 notify_text = (
@@ -1143,4 +1163,3 @@ async def job_check_pending_limit_orders() -> None:
 
         except Exception as e:
             logger.error(f"Error procesando limit order id={order.id} ({order.ticker}): {e}")
-

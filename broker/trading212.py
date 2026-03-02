@@ -24,9 +24,11 @@ Endpoints soportados:
 
 import asyncio
 import base64
+import json
 import logging
 import time
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 
@@ -82,11 +84,14 @@ _RATE_LIMITS = {
     "account": 5.0,       # 1 req / 5s
     "positions": 1.0,     # 1 req / 1s
     "orders_get": 5.0,    # 1 req / 5s
+    "orders_by_id": 1.0,  # 1 req / 1s
     "orders_market": 1.2, # 50 req / 1min ≈ 1.2s
     "orders_limit": 2.0,  # 1 req / 2s
     "orders_stop": 2.0,   # 1 req / 2s
     "orders_cancel": 1.2, # 50 req / 1min
-    "instruments": 1.0,   # 1 req / 1s
+    "history": 10.0,      # 6 req / 1min
+    "instruments": 50.0,  # 1 req / 50s
+    "exchanges": 30.0,    # 1 req / 30s
 }
 
 
@@ -127,6 +132,8 @@ class Trading212Client(BaseBroker):
         self._positions_cache: list[BrokerPosition] = []
         self._positions_ts: float = 0.0
         self._positions_ttl: float = 60.0  # 60 segundos
+        # Control de rate limit por key (timestamp monotónico de última llamada).
+        self._last_call_ts: dict[str, float] = {}
         logger.info(f"🔗 Trading212 configurado en modo {mode.upper()}")
 
     @property
@@ -163,22 +170,55 @@ class Trading212Client(BaseBroker):
         try:
             session = await self._get_session()
             delay = _RATE_LIMITS.get(rate_key, _RATE_LIMITS["default"])
-            await asyncio.sleep(delay)
+            now = time.monotonic()
+            last = self._last_call_ts.get(rate_key)
+            if last is not None:
+                wait_for = delay - (now - last)
+                if wait_for > 0:
+                    await asyncio.sleep(wait_for)
+            self._last_call_ts[rate_key] = time.monotonic()
 
             async with session.request(
                 method, url, json=json_data, params=params
             ) as resp:
                 # Leer headers de rate limit para logging
                 remaining = resp.headers.get("x-ratelimit-remaining")
-                if remaining is not None and int(remaining) < 3:
-                    logger.warning(
-                        f"⚠️ Trading212 rate limit bajo: {remaining} restantes "
-                        f"[{method} {endpoint}]"
-                    )
+                if remaining is not None:
+                    try:
+                        if int(remaining) < 3:
+                            logger.warning(
+                                f"⚠️ Trading212 rate limit bajo: {remaining} restantes "
+                                f"[{method} {endpoint}]"
+                            )
+                    except ValueError:
+                        logger.debug(
+                            f"Header x-ratelimit-remaining no numérico: {remaining}"
+                        )
 
-                if resp.status == 200:
-                    data = await resp.json()
-                    return BrokerResult(success=True, data=data)
+                if 200 <= resp.status < 300:
+                    if resp.status == 204:
+                        return BrokerResult(success=True, data=None)
+
+                    raw = await resp.text()
+                    if not raw.strip():
+                        return BrokerResult(success=True, data=None)
+
+                    content_type = (resp.headers.get("Content-Type") or "").lower()
+                    if "application/json" in content_type:
+                        try:
+                            return BrokerResult(success=True, data=json.loads(raw))
+                        except json.JSONDecodeError:
+                            logger.debug(
+                                "Respuesta 2xx con Content-Type JSON pero body no parseable "
+                                f"[{method} {endpoint}]"
+                            )
+
+                    # Fallback: intentar parsear JSON aunque el content-type no sea correcto.
+                    try:
+                        return BrokerResult(success=True, data=json.loads(raw))
+                    except json.JSONDecodeError:
+                        return BrokerResult(success=True, data=raw)
+
                 elif resp.status == 204:
                     return BrokerResult(success=True, data=None)
                 else:
@@ -493,20 +533,9 @@ class Trading212Client(BaseBroker):
 
         orders = []
         for item in result.data or []:
-            instrument = item.get("instrument", {})
-            orders.append(BrokerOrder(
-                order_id=str(item.get("id", "")),
-                ticker=self._clean_ticker(
-                    instrument.get("ticker", item.get("ticker", ""))
-                ),
-                side=item.get("side", "BUY"),
-                shares=abs(item.get("quantity", 0)),
-                price=item.get("limitPrice"),
-                status=item.get("status", "UNKNOWN"),
-                filled_price=None,
-                filled_shares=item.get("filledQuantity"),
-                timestamp=item.get("createdAt", ""),
-            ))
+            if not isinstance(item, dict):
+                continue
+            orders.append(self._build_broker_order(item, status_default="UNKNOWN"))
 
         return BrokerResult(success=True, data=orders)
 
@@ -516,27 +545,86 @@ class Trading212Client(BaseBroker):
         GET /equity/orders/{id}
         """
         result = await self._request(
-            "GET", f"/equity/orders/{order_id}", rate_key="default"
+            "GET", f"/equity/orders/{order_id}", rate_key="orders_by_id"
         )
         if not result.success:
             return result
 
         item = result.data
-        instrument = item.get("instrument", {})
-        order = BrokerOrder(
-            order_id=str(item.get("id", "")),
-            ticker=self._clean_ticker(
-                instrument.get("ticker", item.get("ticker", ""))
-            ),
-            side=item.get("side", "BUY"),
-            shares=abs(item.get("quantity", 0)),
-            price=item.get("limitPrice"),
-            status=item.get("status", "UNKNOWN"),
-            filled_price=None,
-            filled_shares=item.get("filledQuantity"),
-            timestamp=item.get("createdAt", ""),
+        if not isinstance(item, dict):
+            return BrokerResult(
+                success=False,
+                error=f"Respuesta inválida para order_id={order_id}",
+            )
+
+        return BrokerResult(
+            success=True,
+            data=self._build_broker_order(item, status_default="UNKNOWN"),
         )
-        return BrokerResult(success=True, data=order)
+
+    async def get_historical_order_by_id(
+        self, order_id: str, max_pages: int = 5
+    ) -> BrokerResult:
+        """
+        Busca una orden en el histórico paginado (/equity/history/orders).
+        Útil cuando el endpoint /equity/orders/{id} devuelve 404 porque la orden
+        ya no está pendiente (p.ej. FILLED/CANCELLED).
+        """
+        target_id = str(order_id).strip()
+        if not target_id:
+            return BrokerResult(success=False, error="order_id vacío")
+
+        params: dict[str, Any] = {"limit": 50}
+        for _ in range(max_pages):
+            result = await self._request(
+                "GET",
+                "/equity/history/orders",
+                params=params,
+                rate_key="history",
+            )
+            if not result.success:
+                return result
+
+            data = result.data or {}
+            if not isinstance(data, dict):
+                break
+
+            items = data.get("items", [])
+            if not isinstance(items, list):
+                break
+
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+
+                order_data = item.get("order", item)
+                if not isinstance(order_data, dict):
+                    continue
+
+                if str(order_data.get("id", "")) != target_id:
+                    continue
+
+                fill = item.get("fill")
+                if isinstance(fill, dict) and fill:
+                    merged = dict(order_data)
+                    merged["fill"] = fill
+                else:
+                    merged = dict(order_data)
+
+                return BrokerResult(
+                    success=True,
+                    data=self._build_broker_order(merged, status_default="UNKNOWN"),
+                )
+
+            cursor = self._extract_cursor(data.get("nextPagePath"))
+            if not cursor:
+                break
+            params = {"limit": 50, "cursor": cursor}
+
+        return BrokerResult(
+            success=False,
+            error=f"Orden {target_id} no encontrada en histórico",
+        )
 
     # ── Instruments ──────────────────────────────────────────
 
@@ -708,7 +796,7 @@ class Trading212Client(BaseBroker):
         return await self._request(
             "GET", "/equity/history/orders",
             params={"limit": min(limit, 50)},
-            rate_key="default",
+            rate_key="history",
         )
 
     async def get_dividend_history(self, limit: int = 20) -> BrokerResult:
@@ -719,7 +807,7 @@ class Trading212Client(BaseBroker):
         return await self._request(
             "GET", "/equity/history/dividends",
             params={"limit": min(limit, 50)},
-            rate_key="default",
+            rate_key="history",
         )
 
     async def get_dividend_history_all(self) -> BrokerResult:
@@ -734,7 +822,7 @@ class Trading212Client(BaseBroker):
         for _ in range(max_pages):
             result = await self._request(
                 "GET", "/equity/history/dividends",
-                params=params, rate_key="default",
+                params=params, rate_key="history",
             )
             if not result.success:
                 if all_items:
@@ -756,12 +844,10 @@ class Trading212Client(BaseBroker):
             if not next_path or not items:
                 break
 
-            # El nextPagePath viene como URL relativa, extraer cursor
-            if "cursor=" in next_path:
-                cursor = next_path.split("cursor=")[-1].split("&")[0]
-                params = {"limit": 50, "cursor": cursor}
-            else:
+            cursor = self._extract_cursor(next_path)
+            if not cursor:
                 break
+            params = {"limit": 50, "cursor": cursor}
 
         return BrokerResult(success=True, data=all_items)
 
@@ -773,7 +859,7 @@ class Trading212Client(BaseBroker):
         return await self._request(
             "GET", "/equity/history/transactions",
             params={"limit": min(limit, 50)},
-            rate_key="default",
+            rate_key="history",
         )
 
     # ── Metadata ─────────────────────────────────────────────
@@ -781,7 +867,7 @@ class Trading212Client(BaseBroker):
     async def get_exchanges(self) -> BrokerResult:
         """GET /equity/metadata/exchanges"""
         return await self._request(
-            "GET", "/equity/metadata/exchanges", rate_key="instruments"
+            "GET", "/equity/metadata/exchanges", rate_key="exchanges"
         )
 
     # ── Helpers ──────────────────────────────────────────────
@@ -874,19 +960,87 @@ class Trading212Client(BaseBroker):
     ) -> BrokerOrder:
         """Parsea la respuesta estándar de una orden."""
         data = data or {}
-        instrument = data.get("instrument", {})
+        return self._build_broker_order(
+            data,
+            fallback_ticker=ticker,
+            fallback_side=side.upper(),
+            status_default="NEW",
+        )
+
+    @staticmethod
+    def _extract_cursor(next_path: Any) -> str | None:
+        """Extrae cursor=... de un nextPagePath relativo o absoluto."""
+        if not isinstance(next_path, str) or not next_path:
+            return None
+
+        parsed = urlparse(next_path)
+        if parsed.query:
+            cursor = parse_qs(parsed.query).get("cursor", [None])[0]
+            return str(cursor) if cursor else None
+
+        if "cursor=" in next_path:
+            return next_path.split("cursor=", 1)[1].split("&", 1)[0] or None
+        return None
+
+    @staticmethod
+    def _to_float(value: Any) -> float | None:
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _infer_filled_price(self, item: dict[str, Any]) -> float | None:
+        """Infiere precio de ejecución desde fill.price o filledValue/filledQuantity."""
+        fill = item.get("fill")
+        if isinstance(fill, dict):
+            fill_price = self._to_float(fill.get("price"))
+            if fill_price is not None and fill_price > 0:
+                return fill_price
+
+        filled_value = self._to_float(item.get("filledValue"))
+        filled_qty = self._to_float(item.get("filledQuantity"))
+        if filled_value is not None and filled_qty is not None and abs(filled_qty) > 0:
+            return filled_value / abs(filled_qty)
+        return None
+
+    def _build_broker_order(
+        self,
+        item: dict[str, Any],
+        fallback_ticker: str = "",
+        fallback_side: str = "BUY",
+        status_default: str = "UNKNOWN",
+    ) -> BrokerOrder:
+        instrument = item.get("instrument", {})
+        fill = item.get("fill", {}) if isinstance(item.get("fill"), dict) else {}
+
+        ticker_raw = ""
+        if isinstance(instrument, dict):
+            ticker_raw = instrument.get("ticker", "") or ""
+        if not ticker_raw:
+            ticker_raw = str(item.get("ticker", fallback_ticker))
+
+        filled_shares = item.get("filledQuantity")
+        if filled_shares is None and fill:
+            filled_shares = fill.get("quantity")
+
+        order_price = item.get("limitPrice")
+        if order_price is None:
+            order_price = item.get("stopPrice")
+
+        timestamp = item.get("createdAt") or fill.get("filledAt", "")
+
         return BrokerOrder(
-            order_id=str(data.get("id", "")),
-            ticker=self._clean_ticker(
-                instrument.get("ticker", data.get("ticker", ticker))
-            ),
-            side=data.get("side", side.upper()),
-            shares=abs(data.get("quantity", 0)),
-            price=data.get("limitPrice"),
-            status=data.get("status", "NEW"),
-            filled_price=None,
-            filled_shares=data.get("filledQuantity"),
-            timestamp=data.get("createdAt", ""),
+            order_id=str(item.get("id", "")),
+            ticker=self._clean_ticker(ticker_raw),
+            side=str(item.get("side", fallback_side)).upper(),
+            shares=abs(self._to_float(item.get("quantity")) or 0.0),
+            price=self._to_float(order_price),
+            status=str(item.get("status", status_default)).upper(),
+            filled_price=self._infer_filled_price(item),
+            filled_shares=self._to_float(filled_shares),
+            timestamp=str(timestamp or ""),
         )
 
 
@@ -960,11 +1114,23 @@ def init_trading212_from_credentials(
     Solo se crean clientes para los modos con credenciales.
     """
     global _default_mode
-    _default_mode = primary_mode.lower()
+    requested_primary = primary_mode.lower()
+
     for mode, (key, secret) in credentials.items():
         init_trading212(key, secret, mode)
+
+    # El modo por defecto debe respetar el primary_mode solicitado
+    # (si existe), no el último cliente inicializado.
+    if requested_primary in _clients:
+        _default_mode = requested_primary
+    elif _clients:
+        _default_mode = next(iter(_clients))
+
     modes = ", ".join(m.upper() for m in _clients)
-    logger.info(f"🔗 Trading212 inicializado: {modes}")
+    logger.info(
+        f"🔗 Trading212 inicializado: {modes} "
+        f"(default={_default_mode.upper()})"
+    )
     return dict(_clients)
 
 
