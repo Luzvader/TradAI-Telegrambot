@@ -135,8 +135,8 @@ class Position(Base):
             "ticker",
             "market",
             unique=True,
-            # Avoid enum-label casing mismatches (OPEN/open) across environments.
-            postgresql_where=text("lower(status::text) = 'open'"),
+            # "Open" positions are represented by a NULL closed_at timestamp.
+            postgresql_where=text("closed_at IS NULL"),
         ),
     )
 
