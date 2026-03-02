@@ -135,7 +135,8 @@ class Position(Base):
             "ticker",
             "market",
             unique=True,
-            postgresql_where=text("status = 'open'::positionstatus"),
+            # Avoid enum-label casing mismatches (OPEN/open) across environments.
+            postgresql_where=text("lower(status::text) = 'open'"),
         ),
     )
 

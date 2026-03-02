@@ -17,10 +17,15 @@ depends_on = None
 def upgrade() -> None:
     op.execute(
         sa.text(
+            "DROP INDEX IF EXISTS uq_positions_open_portfolio_ticker_market"
+        )
+    )
+    op.execute(
+        sa.text(
             "CREATE UNIQUE INDEX IF NOT EXISTS "
             "uq_positions_open_portfolio_ticker_market "
             "ON positions (portfolio_id, ticker, market) "
-            "WHERE status = 'open'::positionstatus"
+            "WHERE lower(status::text) = 'open'"
         )
     )
 
