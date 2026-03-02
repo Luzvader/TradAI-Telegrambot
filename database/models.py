@@ -135,7 +135,7 @@ class Position(Base):
             "ticker",
             "market",
             unique=True,
-            postgresql_where=text("status = 'open'"),
+            postgresql_where=text("status = 'open'::positionstatus"),
         ),
     )
 

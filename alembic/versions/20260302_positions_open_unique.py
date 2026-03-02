@@ -20,7 +20,7 @@ def upgrade() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS "
             "uq_positions_open_portfolio_ticker_market "
             "ON positions (portfolio_id, ticker, market) "
-            "WHERE status = 'open'"
+            "WHERE status = 'open'::positionstatus"
         )
     )
 
