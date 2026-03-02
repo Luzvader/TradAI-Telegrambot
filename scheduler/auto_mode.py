@@ -378,67 +378,71 @@ async def _auto_analyze_positions(portfolio_id: int, config) -> None:
         # Actualizar precios
         await update_all_prices(portfolio_id)
 
-        # Generar señales
-        signals = await generate_signals_for_portfolio(portfolio_id)
+        # Generar señales (skip_dedup=True para que el modo auto siempre
+        # obtenga señales accionables, sin importar si job_generate_signals
+        # ya creó señales recientes para los mismos tickers)
+        signals = await generate_signals_for_portfolio(portfolio_id, skip_dedup=True)
 
         # Comprobar alertas SL/TP
         alerts = await check_alerts(portfolio_id)
 
-        # Notificar señales accionables
-        if config.notify_signals:
-            actionable = [s for s in signals if s.get("type") in ("BUY", "SELL")]
-            if actionable:
-                mode_label = "🟢 ON" if mode == AutoModeType.ON else "🛡️ SAFE"
-                text = f"🤖 *MODO AUTO ({mode_label}) — Señales*\n\n"
+        # Filtrar señales accionables (BUY/SELL)
+        actionable = [s for s in signals if s.get("type") in ("BUY", "SELL")]
+
+        if actionable:
+            # Construir texto de notificación
+            mode_label = "🟢 ON" if mode == AutoModeType.ON else "🛡️ SAFE"
+            text = f"🤖 *MODO AUTO ({mode_label}) — Señales*\n\n"
+            for s in actionable:
+                emoji = "🟢" if s["type"] == "BUY" else "🔴"
+                sig_ccy = MARKET_CURRENCY.get(s.get('market', 'NASDAQ'), 'USD')
+                price_str = format_price(s['price'], sig_ccy) if s.get('price') else "N/A"
+                score_val = s.get('overall_score', s.get('score'))
+                score_str = f" | Score: {score_val:.0f}" if score_val else ""
+                text += f"{emoji} *{s['ticker']}* → {s['type']} | Precio: {price_str}{score_str}\n"
+                if s.get("pnl_pct") is not None:
+                    text += f"   💰 PnL: {s['pnl_pct']}%\n"
+                # Mostrar campos estructurados relevantes
+                if s.get("margin_of_safety"):
+                    text += f"   📏 MoS: {s['margin_of_safety']}%\n"
+                reason_line = s.get('reason') or s.get('reasoning')
+                if reason_line:
+                    # Primera frase como resumen
+                    first_sentence = reason_line.split('.')[0].strip()
+                    if first_sentence:
+                        text += f"   📝 {first_sentence}.\n"
+                text += "\n"
+
+            if mode == AutoModeType.ON:
+                # Full auto: ejecutar operaciones
                 for s in actionable:
-                    emoji = "🟢" if s["type"] == "BUY" else "🔴"
-                    sig_ccy = MARKET_CURRENCY.get(s.get('market', 'NASDAQ'), 'USD')
-                    price_str = format_price(s['price'], sig_ccy) if s.get('price') else "N/A"
-                    score_val = s.get('overall_score', s.get('score'))
-                    score_str = f" | Score: {score_val:.0f}" if score_val else ""
-                    text += f"{emoji} *{s['ticker']}* → {s['type']} | Precio: {price_str}{score_str}\n"
-                    if s.get("pnl_pct") is not None:
-                        text += f"   💰 PnL: {s['pnl_pct']}%\n"
-                    # Mostrar campos estructurados relevantes
-                    if s.get("margin_of_safety"):
-                        text += f"   📏 MoS: {s['margin_of_safety']}%\n"
-                    reason_line = s.get('reason') or s.get('reasoning')
-                    if reason_line:
-                        # Primera frase como resumen
-                        first_sentence = reason_line.split('.')[0].strip()
-                        if first_sentence:
-                            text += f"   📝 {first_sentence}.\n"
-                    text += "\n"
-
-                if mode == AutoModeType.ON:
-                    # Full auto: ejecutar operaciones
-                    for s in actionable:
-                        if s["type"] == "SELL":
-                            await _auto_execute_sell(portfolio_id, s)
-                        elif s["type"] == "BUY":
-                            await _auto_execute_buy(portfolio_id, s)
-                    text += "_Operaciones ejecutadas automáticamente._\n"
+                    if s["type"] == "SELL":
+                        await _auto_execute_sell(portfolio_id, s)
+                    elif s["type"] == "BUY":
+                        await _auto_execute_buy(portfolio_id, s)
+                text += "_Operaciones ejecutadas automáticamente._\n"
+                if config.notify_signals:
                     await _notify(text)
 
-                elif mode == AutoModeType.SAFE:
-                    # Safe: notificar y pedir confirmación
-                    await _notify(text)
-                    for s in actionable:
-                        if s["type"] == "SELL":
-                            await _send_sell_confirmation(portfolio_id, s)
-                        elif s["type"] == "BUY":
-                            await _send_buy_confirmation(portfolio_id, s)
-
-            # Alertas SL/TP
-            if alerts:
-                text = f"🤖 *MODO AUTO — ⚠️ Alertas*\n\n"
-                for a in alerts:
-                    aa_ccy = MARKET_CURRENCY.get(a.get('market', 'NASDAQ'), 'USD')
-                    text += (
-                        f"{a['type']} *{a['ticker']}*\n"
-                        f"   Precio: {format_price(a['current_price'], aa_ccy)} | PnL: {a['pnl_pct']}%\n\n"
-                    )
+            elif mode == AutoModeType.SAFE:
+                # Safe: notificar y pedir confirmación
                 await _notify(text)
+                for s in actionable:
+                    if s["type"] == "SELL":
+                        await _send_sell_confirmation(portfolio_id, s)
+                    elif s["type"] == "BUY":
+                        await _send_buy_confirmation(portfolio_id, s)
+
+        # Alertas SL/TP (siempre, independiente de señales accionables)
+        if alerts:
+            text = f"🤖 *MODO AUTO — ⚠️ Alertas*\n\n"
+            for a in alerts:
+                aa_ccy = MARKET_CURRENCY.get(a.get('market', 'NASDAQ'), 'USD')
+                text += (
+                    f"{a['type']} *{a['ticker']}*\n"
+                    f"   Precio: {format_price(a['current_price'], aa_ccy)} | PnL: {a['pnl_pct']}%\n\n"
+                )
+            await _notify(text)
 
     except Exception as e:
         logger.error(f"Error en auto_analyze_positions: {e}")

@@ -27,10 +27,17 @@ logger = logging.getLogger(__name__)
 
 async def generate_signals_for_portfolio(
     portfolio_id: int,
+    skip_dedup: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Genera señales para todas las posiciones abiertas del portfolio.
     Comprueba stop-loss, take-profit y reevalúa el score según la estrategia.
+
+    Args:
+        portfolio_id: ID del portfolio.
+        skip_dedup: Si True, omite la deduplicación de señales recientes.
+                    Útil cuando se llama desde el modo automático para que
+                    siempre obtenga señales accionables.
     """
     portfolio = await repo.get_portfolio(portfolio_id)
     strategy = (
@@ -60,15 +67,16 @@ async def generate_signals_for_portfolio(
 
             # Deduplicación: si ya hay señal reciente (24h) para este ticker, saltar
             # Nota: comprobamos señales de cualquier tipo para no saturar
-            recent_sell = await repo.has_recent_signal(
-                pos.ticker, SignalType.SELL, hours=24, market=pos.market
-            )
-            recent_hold = await repo.has_recent_signal(
-                pos.ticker, SignalType.HOLD, hours=24, market=pos.market
-            )
-            if recent_sell or recent_hold:
-                logger.debug(f"Señal reciente ya existe para {pos.ticker}, omitiendo")
-                continue
+            if not skip_dedup:
+                recent_sell = await repo.has_recent_signal(
+                    pos.ticker, SignalType.SELL, hours=24, market=pos.market
+                )
+                recent_hold = await repo.has_recent_signal(
+                    pos.ticker, SignalType.HOLD, hours=24, market=pos.market
+                )
+                if recent_sell or recent_hold:
+                    logger.debug(f"Señal reciente ya existe para {pos.ticker}, omitiendo")
+                    continue
 
             # Check stop-loss / take-profit
             sl_tp = check_stop_loss_take_profit(pos)
@@ -89,6 +97,7 @@ async def generate_signals_for_portfolio(
                 signals.append({
                     "signal_id": sig.id,
                     "ticker": pos.ticker,
+                    "market": pos.market,
                     "type": "SELL",
                     "reason": "STOP-LOSS",
                     "price": pos.current_price,
@@ -113,6 +122,7 @@ async def generate_signals_for_portfolio(
                 signals.append({
                     "signal_id": sig.id,
                     "ticker": pos.ticker,
+                    "market": pos.market,
                     "type": "SELL",
                     "reason": "TAKE-PROFIT",
                     "price": pos.current_price,
@@ -190,9 +200,12 @@ async def generate_signals_for_portfolio(
             signals.append({
                 "signal_id": sig.id,
                 "ticker": pos.ticker,
+                "market": pos.market,
                 "type": signal_type.value,
                 "price": pos.current_price,
+                "overall_score": vs.overall_score,
                 "score": vs.overall_score,
+                "margin_of_safety": vs.margin_of_safety,
                 "pnl_pct": sl_tp.get("pnl_pct"),
                 "reasoning": reasoning,
                 "strategy": vs.strategy,
