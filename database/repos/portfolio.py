@@ -3,7 +3,7 @@ Repositorio – Portfolio, Positions, Operations, Cash, Strategy, Snapshots.
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Optional, Sequence
 
 from sqlalchemy import select, update
@@ -20,6 +20,8 @@ from database.models import (
     Position,
     PositionStatus,
     StrategyType,
+    PendingLimitOrder,
+    PendingLimitOrderStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -361,3 +363,96 @@ async def get_portfolio_snapshots(
         )
         result = await session.execute(stmt)
         return result.scalars().all()
+
+
+# ── Pending Limit Orders ─────────────────────────────────────
+
+
+async def create_pending_limit_order(
+    portfolio_id: int,
+    ticker: str,
+    market: str,
+    shares: float,
+    limit_price: float,
+    broker_order_id: str | None = None,
+    chat_id: str | None = None,
+    asset_type: str | None = None,
+    ttl_hours: int = 24,
+) -> PendingLimitOrder:
+    """Registra una nueva orden límite pendiente."""
+    async with async_session_factory() as session:
+        now = datetime.now(UTC)
+        order = PendingLimitOrder(
+            portfolio_id=portfolio_id,
+            ticker=ticker.upper(),
+            market=market,
+            shares=shares,
+            limit_price=limit_price,
+            broker_order_id=broker_order_id,
+            chat_id=chat_id,
+            asset_type=asset_type,
+            status=PendingLimitOrderStatus.PENDING,
+            placed_at=now,
+            expires_at=now + timedelta(hours=ttl_hours),
+        )
+        session.add(order)
+        await session.commit()
+        await session.refresh(order)
+        logger.info(
+            f"📋 Limit order registrada: {ticker} x{shares} @ {limit_price} "
+            f"(broker_id={broker_order_id}, expira={order.expires_at.isoformat()})"
+        )
+        return order
+
+
+async def get_pending_limit_orders_active() -> Sequence[PendingLimitOrder]:
+    """Devuelve todas las órdenes límite con estado PENDING."""
+    async with async_session_factory() as session:
+        stmt = select(PendingLimitOrder).where(
+            PendingLimitOrder.status == PendingLimitOrderStatus.PENDING
+        )
+        result = await session.execute(stmt)
+        return result.scalars().all()
+
+
+async def mark_limit_order_filled(
+    order_id: int,
+    filled_price: float | None = None,
+) -> None:
+    """Marca una orden límite como ejecutada."""
+    async with async_session_factory() as session:
+        stmt = (
+            update(PendingLimitOrder)
+            .where(PendingLimitOrder.id == order_id)
+            .values(
+                status=PendingLimitOrderStatus.FILLED,
+                filled_at=datetime.now(UTC),
+                filled_price=filled_price,
+            )
+        )
+        await session.execute(stmt)
+        await session.commit()
+
+
+async def mark_limit_order_cancelled(order_id: int) -> None:
+    """Marca una orden límite como cancelada manualmente."""
+    async with async_session_factory() as session:
+        stmt = (
+            update(PendingLimitOrder)
+            .where(PendingLimitOrder.id == order_id)
+            .values(status=PendingLimitOrderStatus.CANCELLED)
+        )
+        await session.execute(stmt)
+        await session.commit()
+
+
+async def mark_limit_order_expired(order_id: int) -> None:
+    """Marca una orden límite como expirada (24h sin ejecución)."""
+    async with async_session_factory() as session:
+        stmt = (
+            update(PendingLimitOrder)
+            .where(PendingLimitOrder.id == order_id)
+            .values(status=PendingLimitOrderStatus.EXPIRED)
+        )
+        await session.execute(stmt)
+        await session.commit()

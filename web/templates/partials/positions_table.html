@@ -19,9 +19,9 @@
             <td>{{ p.market }}</td>
             <td>{{ p.sector }}</td>
             <td>{{ "{:.2f}".format(p.shares) }}</td>
-            <td>${{ "{:.2f}".format(p.avg_price) }}</td>
-            <td>${{ "{:.2f}".format(p.current_price or 0) }}</td>
-            <td>${{ "{:,.2f}".format(p.value) }}</td>
+            <td>{{ p.currency_symbol }}{{ "{:.2f}".format(p.avg_price) }}</td>
+            <td>{{ p.currency_symbol }}{{ "{:.2f}".format(p.current_price or 0) }}</td>
+            <td>{{ p.currency_symbol }}{{ "{:,.2f}".format(p.value) }}</td>
             <td class="{{ 'positive' if p.pnl_pct >= 0 else 'negative' }}">
                 {{ "{:+.2f}".format(p.pnl_pct) }}%
                 <br><small>${{ "{:+,.2f}".format(p.pnl_abs) }}</small>

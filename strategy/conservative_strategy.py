@@ -190,7 +190,7 @@ def _build_reasoning(
     if fd.debt_to_equity is not None:
         reasons.append(f"Deuda/Equity: {fd.debt_to_equity:.0f}%")
     if fd.market_cap is not None:
-        reasons.append(f"Market cap: {fd.market_cap/1e9:.0f}B$")
+        reasons.append(f"Market cap: {fd.market_cap/1e9:.0f}B {fd.currency or 'USD'}")
     if mos is not None:
         reasons.append(f"Margen de seguridad (consenso): {mos:.1f}%")
 

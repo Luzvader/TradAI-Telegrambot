@@ -32,7 +32,7 @@ from config.settings import (
 from data.market_data import is_market_open, is_any_trading_day, get_current_price
 from data.news import save_context_snapshot
 from database import repository as repo
-from database.models import PortfolioType
+from database.models import OperationOrigin, PortfolioType
 from notifications import notify as _notify, set_notification_bot
 from portfolio.portfolio_manager import check_alerts, update_all_prices
 from scheduler.auto_mode import auto_mode_cycle, set_auto_mode_bot
@@ -147,6 +147,15 @@ def init_scheduler(telegram_bot: Bot | None = None) -> AsyncIOScheduler:
         IntervalTrigger(minutes=30),
         id="sync_broker",
         name="Sync Trading212",
+        replace_existing=True,
+    )
+
+    # ── Cada 30 min: comprobar órdenes límite pendientes ──
+    scheduler.add_job(
+        job_check_pending_limit_orders,
+        IntervalTrigger(minutes=30),
+        id="check_pending_limit_orders",
+        name="Comprobar órdenes límite",
         replace_existing=True,
     )
 
@@ -979,4 +988,159 @@ recomendación para ajustar agresividad del auto-mode.
     text += f"\n🧠 {analysis}\n\n_Análisis incorporado al aprendizaje._"
     await _notify(text)
     logger.info(f"📊 Análisis de tendencias completado (drawdown: {drawdown:+.1f}%)")
+
+
+async def job_check_pending_limit_orders() -> None:
+    """
+    Comprueba el estado de todas las órdenes de compra límite pendientes.
+
+    Para cada orden PENDING:
+      • Si el broker la marcó como FILLED → registra la compra en el portfolio
+        y notifica al usuario.
+      • Si han pasado 24h y sigue sin ejecutarse → cancela la orden en T212,
+        la marca como EXPIRED, re-analiza el ticker con IA y notifica.
+    """
+    from datetime import UTC, datetime
+    from broker.bridge import broker_cancel_order
+    from portfolio.portfolio_manager import execute_buy
+    from signals.signal_engine import analyze_ticker
+
+    pending_orders = list(await repo.get_pending_limit_orders_active())
+    if not pending_orders:
+        return
+
+    logger.info(f"⏳ Comprobando {len(pending_orders)} órdenes límite pendientes…")
+    now = datetime.now(UTC)
+
+    for order in pending_orders:
+        try:
+            portfolio = await repo.get_portfolio(order.portfolio_id)
+            if portfolio is None:
+                continue
+
+            filled = False
+            filled_price: float | None = None
+
+            # ── Consultar estado en T212 ──
+            if order.broker_order_id:
+                try:
+                    from broker.trading212 import get_trading212_client
+                    client = get_trading212_client()
+                    if client:
+                        result = await client.get_order_by_id(order.broker_order_id)
+                        if result.success and result.data:
+                            t212_order = result.data
+                            status = getattr(t212_order, "status", "").upper()
+                            if status in ("FILLED", "EXECUTED"):
+                                filled = True
+                                filled_price = float(
+                                    getattr(t212_order, "filled_price", None)
+                                    or getattr(t212_order, "price", None)
+                                    or order.limit_price
+                                )
+                except Exception as e:
+                    logger.debug(f"Error consultando orden {order.broker_order_id} en T212: {e}")
+
+            # ── Orden ejecutada ──
+            if filled:
+                logger.info(
+                    f"✅ Limit order ejecutada: {order.ticker} x{order.shares} "
+                    f"@ {filled_price} (order_id={order.id})"
+                )
+                # Recuperar asset_type guardado en la orden
+                from database.models import AssetType as _AssetType
+                _asset_type = None
+                if order.asset_type:
+                    try:
+                        _asset_type = _AssetType(order.asset_type)
+                    except ValueError:
+                        pass
+                buy_result = await execute_buy(
+                    portfolio_id=order.portfolio_id,
+                    ticker=order.ticker,
+                    market=order.market,
+                    price=filled_price or order.limit_price,
+                    shares=order.shares,
+                    asset_type=_asset_type,
+                    origin=OperationOrigin.MANUAL,
+                )
+                await repo.mark_limit_order_filled(order.id, filled_price=filled_price)
+
+                notify_text = (
+                    f"✅ *Limit Order ejecutada*\n\n"
+                    f"📌 {order.ticker} ({order.market})\n"
+                    f"📊 Acciones: {order.shares}\n"
+                    f"💵 Precio: {filled_price or order.limit_price}$\n"
+                    f"💰 Total: {(order.shares * (filled_price or order.limit_price)):.2f}$"
+                )
+                if buy_result.get("stop_loss"):
+                    notify_text += f"\n🛡️ Stop-Loss: {buy_result['stop_loss']}$"
+                    notify_text += f"\n🎯 Take-Profit: {buy_result['take_profit']}$"
+                await _notify(notify_text)
+
+            # ── Orden expirada (24h sin ejecución) ──
+            elif now >= order.expires_at:
+                logger.info(
+                    f"⌛ Limit order expirada: {order.ticker} @ {order.limit_price} "
+                    f"(order_id={order.id})"
+                )
+
+                # Cancelar en T212
+                if order.broker_order_id:
+                    try:
+                        await broker_cancel_order(order.broker_order_id)
+                    except Exception as e:
+                        logger.warning(
+                            f"No se pudo cancelar la orden {order.broker_order_id} en T212: {e}"
+                        )
+
+                await repo.mark_limit_order_expired(order.id)
+
+                # Re-analizar el ticker
+                try:
+                    analysis = await analyze_ticker(
+                        ticker=order.ticker,
+                        market=order.market,
+                        portfolio_id=order.portfolio_id,
+                    )
+                    signal = analysis.get("signal", "HOLD")
+                    score = analysis.get("score", 0)
+                    current_price = analysis.get("price", None)
+
+                    price_str = f"{current_price:.2f}$" if current_price else "N/A"
+                    reanalysis_text = (
+                        f"⌛ *Limit Order expirada* _{order.ticker}_\n\n"
+                        f"📋 La orden de {order.shares} acciones @ {order.limit_price}$ "
+                        f"no se ejecutó en 24h y ha sido cancelada.\n\n"
+                        f"🔍 *Re-análisis:*\n"
+                        f"   Señal: {signal} | Score: {score} | Precio actual: {price_str}\n"
+                    )
+
+                    if signal == "BUY" and score >= 70:
+                        reanalysis_text += (
+                            f"\n✅ _El análisis sigue siendo positivo (score {score}/100)._\n"
+                            f"_Puedes lanzar una nueva orden con_ "
+                            f"`/buy {order.ticker} {order.shares}`"
+                        )
+                    elif signal == "SELL":
+                        reanalysis_text += (
+                            f"\n🔴 _El análisis ahora recomienda VENTA. No se repetirá la orden._"
+                        )
+                    else:
+                        reanalysis_text += (
+                            f"\n🟡 _El análisis es neutro. Monitoriza antes de volver a comprar._"
+                        )
+                except Exception as e:
+                    logger.warning(f"Error re-analizando {order.ticker} tras expiración: {e}")
+                    reanalysis_text = (
+                        f"⌛ *Limit Order expirada* _{order.ticker}_\n\n"
+                        f"La orden de {order.shares} acciones @ {order.limit_price}$ "
+                        f"no se ejecutó en 24h y ha sido cancelada.\n"
+                        f"_(No se pudo completar el re-análisis)_"
+                    )
+
+                await _notify(reanalysis_text)
+
+        except Exception as e:
+            logger.error(f"Error procesando limit order id={order.id} ({order.ticker}): {e}")
 

@@ -510,7 +510,7 @@ async def cmd_etf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         lines = [f"📊 *ETFs — {label.upper()}*\n"]
         for r in top:
             emoji = "🟢" if r["signal"] == "BUY" else "🔴" if r["signal"] == "SELL" else "🟡"
-            price_str = f"${r['price']:.2f}" if r["price"] else "N/A"  # ETFs son siempre USD
+            price_str = format_price(r["price"], r.get("currency", "USD")) if r["price"] else "N/A"
             lines.append(
                 f"{emoji} *{r['ticker']}* — Score: {r['score']:.0f} | "
                 f"{price_str} | {r['signal']}"

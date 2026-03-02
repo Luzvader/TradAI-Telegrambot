@@ -432,3 +432,49 @@ class InvestmentObjective(Base):
     active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+
+
+class PendingLimitOrderStatus(str, enum.Enum):
+    PENDING = "pending"    # Orden enviada al broker, esperando ejecución
+    FILLED = "filled"      # Ejecutada por el broker
+    CANCELLED = "cancelled"  # Cancelada (manual o por expiración 24h)
+    EXPIRED = "expired"    # 24h sin ejecución → reanalizado y descartado
+
+
+class PendingLimitOrder(Base):
+    """
+    Orden de compra límite pendiente de ejecución en el broker.
+
+    Cuando el usuario lanza /buy TICKER CANTIDAD PRECIO se registra aquí
+    hasta que el broker la ejecuta o expira (24h).
+    Al expirar se cancela la orden en T212 y se re-analiza la acción.
+    """
+    __tablename__ = "pending_limit_orders"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    portfolio_id = Column(Integer, ForeignKey("portfolios.id"), nullable=False)
+    ticker = Column(String(20), nullable=False)
+    market = Column(String(20), nullable=False, default="NASDAQ")
+    shares = Column(Float, nullable=False)
+    limit_price = Column(Float, nullable=False)
+    # ID de la orden en Trading212 (puede ser None si broker no está disponible)
+    broker_order_id = Column(String(100), nullable=True)
+    # Chat de Telegram para notificar al usuario (puede ser None)
+    chat_id = Column(String(50), nullable=True)
+    # Tipo de activo (stock / etf) para propagar al execute_buy al rellenar
+    asset_type = Column(String(10), nullable=True)  # "stock" | "etf" | None
+    status = Column(
+        Enum(PendingLimitOrderStatus),
+        default=PendingLimitOrderStatus.PENDING,
+        nullable=False,
+    )
+    placed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    expires_at = Column(DateTime(timezone=True), nullable=False)  # placed_at + 24h
+    filled_at = Column(DateTime(timezone=True), nullable=True)
+    filled_price = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_pending_limit_orders_status", "status"),
+        Index("ix_pending_limit_orders_ticker", "ticker"),
+    )

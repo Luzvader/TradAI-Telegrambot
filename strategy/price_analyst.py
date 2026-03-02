@@ -163,12 +163,13 @@ def diagnose(fd: FundamentalData) -> PriceDiagnosis:
     if price and fd.target_price and fd.target_price > 0:
         d.margin_of_safety = round((fd.target_price - price) / fd.target_price * 100, 2)
         d.fair_value_consensus = fd.target_price
+        _ccy = fd.currency or "USD"
         if d.margin_of_safety > 20:
             undervalued += 2
-            d.bullets.append(f"🎯 Target consenso {fd.target_price:.2f}$ (+{d.margin_of_safety:.0f}% upside)")
+            d.bullets.append(f"🎯 Target consenso {fd.target_price:.2f} {_ccy} (+{d.margin_of_safety:.0f}% upside)")
         elif d.margin_of_safety > 5:
             undervalued += 0.5
-            d.bullets.append(f"🎯 Target consenso {fd.target_price:.2f}$ (+{d.margin_of_safety:.0f}% upside)")
+            d.bullets.append(f"🎯 Target consenso {fd.target_price:.2f} {_ccy} (+{d.margin_of_safety:.0f}% upside)")
         elif d.margin_of_safety < -10:
             overvalued += 1.5
             d.bullets.append(f"⚠️ Precio sobre target consenso ({d.margin_of_safety:+.0f}%)")
@@ -221,7 +222,7 @@ def format_for_prompt(d: PriceDiagnosis) -> str:
         f"  Valoración: {d.valuation_signal} (confianza {d.confidence}%)",
     ]
     if d.current_price:
-        price_parts = [f"Precio: {d.current_price:.2f}$"]
+        price_parts = [f"Precio: {d.current_price:.2f}"]
         if d.range_position is not None:
             price_parts.append(f"Rango 52s: {d.range_position:.0%}")
         if d.pct_vs_200d is not None:
@@ -231,9 +232,9 @@ def format_for_prompt(d: PriceDiagnosis) -> str:
     if d.fair_value_pe or d.fair_value_consensus:
         fv = []
         if d.fair_value_pe:
-            fv.append(f"P/E sect.: {d.fair_value_pe:.2f}$")
+            fv.append(f"P/E sect.: {d.fair_value_pe:.2f}")
         if d.fair_value_consensus:
-            fv.append(f"Consenso: {d.fair_value_consensus:.2f}$")
+            fv.append(f"Consenso: {d.fair_value_consensus:.2f}")
         lines.append(f"  Precio justo → {' | '.join(fv)}")
 
     for b in d.bullets[:5]:

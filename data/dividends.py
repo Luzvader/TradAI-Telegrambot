@@ -12,7 +12,8 @@ from typing import Any
 
 import yfinance as yf
 
-from config.markets import get_yfinance_ticker
+from config.markets import get_yfinance_ticker, format_price, get_currency_symbol
+from config.settings import ACCOUNT_CURRENCY
 from database import repository as repo
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ async def check_and_record_dividends(portfolio_id: int) -> list[dict[str, Any]]:
                     market="NASDAQ",  # se infiere después si es necesario
                     amount_per_share=amount_per_share,
                     shares_held=quantity,
-                    currency="USD",
+                    currency=ACCOUNT_CURRENCY,  # T212 paga en la divisa de la cuenta
                     ex_date=pay_date,
                     pay_date=pay_date,
                 )
@@ -94,7 +95,7 @@ async def check_and_record_dividends(portfolio_id: int) -> list[dict[str, Any]]:
                 })
                 logger.info(
                     f"💰 Dividendo T212: {ticker} "
-                    f"${amount:.2f} ({quantity:.2f} acc)"
+                    f"{format_price(amount, ACCOUNT_CURRENCY)} ({quantity:.2f} acc)"
                 )
     except Exception as e:
         logger.warning(f"Error obteniendo dividendos de T212: {e}")
@@ -143,9 +144,10 @@ async def check_and_record_dividends(portfolio_id: int) -> list[dict[str, Any]]:
                     "ex_date": str(ex_date.date()) if ex_date else "N/A",
                     "source": "yfinance",
                 })
+                div_ccy = div_info.get("currency", ACCOUNT_CURRENCY)
                 logger.info(
                     f"Dividendo registrado (yfinance): {pos.ticker} "
-                    f"${div_info['amount']:.4f}/acc × {pos.shares} = ${dp.total_amount:.2f}"
+                    f"{format_price(div_info['amount'], div_ccy)}/acc × {pos.shares} = {format_price(dp.total_amount, div_ccy)}"
                 )
         except Exception as e:
             logger.warning(f"Error comprobando dividendos de {pos.ticker}: {e}")

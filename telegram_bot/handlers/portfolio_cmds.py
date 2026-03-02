@@ -160,9 +160,11 @@ async def cmd_cartera(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Comando /buy TICKER CANTIDAD PRECIO
-    Ejemplo: /buy AAPL 10 185.50
-    Pide confirmación con botón inline antes de ejecutar.
+    Comando /buy TICKER CANTIDAD [PRECIO]
+    Sin precio → market order al precio actual de mercado.
+    Con precio → limit order: espera hasta que el precio sea alcanzado (máx 24h).
+    Ejemplo: /buy AAPL 10 185.50  → limit order
+             /buy AAPL 10          → market order
     """
     full_text = update.message.text or ""
     parsed = _parse_buy_sell(full_text)
@@ -170,11 +172,12 @@ async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if parsed is None:
         await update.message.reply_text(
             "❌ Formato incorrecto.\n\n"
-            "*Uso:* `/buy TICKER CANTIDAD PRECIO`\n"
-            "*Ejemplo:* `/buy AAPL 10 185.50`\n\n"
+            "*Uso:* `/buy TICKER CANTIDAD [PRECIO]`\n"
+            "*Market order:* `/buy AAPL 10`\n"
+            "*Limit order:* `/buy AAPL 10 185.50`\n\n"
             "_TICKER = símbolo (AAPL, MSFT...)_\n"
             "_CANTIDAD = número de acciones_\n"
-            "_PRECIO = precio de compra en $_ ",
+            "_PRECIO = precio límite (opcional, si se omite se compra a mercado)_ ",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
@@ -187,15 +190,37 @@ async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     base, inferred_market = split_yfinance_suffix(parsed["ticker"])
     ticker = normalize_ticker(base)
     market = inferred_market or DEFAULT_TICKER_MARKET.get(ticker, "NASDAQ")
-
-    total = parsed["shares"] * parsed["price"]
-    mkt_display = _escape_md(market_display(market))
     buy_ccy = MARKET_CURRENCY.get(market, "USD")
+    mkt_display = _escape_md(market_display(market))
+
+    is_market_order = parsed["price"] is None
+
+    if is_market_order:
+        # Obtener precio actual
+        from data.market_data import get_current_price
+        await update.message.reply_text(f"⏳ Obteniendo precio actual de {ticker}...")
+        current_price = await get_current_price(ticker, market)
+        if current_price is None or current_price <= 0:
+            await update.message.reply_text(
+                f"❌ No se pudo obtener el precio actual de {ticker}. "
+                f"Intenta de nuevo o usa `/buy {ticker} CANTIDAD PRECIO` para indicar el precio manualmente.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+        price = current_price
+        order_label = "🏪 *Market Order* _(precio actual, puede variar)_"
+        order_type = "market"
+    else:
+        price = parsed["price"]
+        order_label = "🎯 *Limit Order* _(se ejecutará cuando el precio alcance este valor)_"
+        order_type = "limit"
+
+    total = parsed["shares"] * price
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
                 "✅ Confirmar compra",
-                callback_data=f"buy_confirm:{ticker}:{market}:{parsed['shares']}:{parsed['price']}",
+                callback_data=f"buy_confirm:{ticker}:{market}:{parsed['shares']}:{price}:{order_type}",
             ),
             InlineKeyboardButton("❌ Cancelar", callback_data="buy_cancel"),
         ]
@@ -203,10 +228,13 @@ async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     text = (
         f"🛒 *¿Confirmar compra?*\n\n"
+        f"{order_label}\n\n"
         f"📌 Ticker: {_escape_md(ticker)} ({mkt_display})\n"
         f"📊 Acciones: {parsed['shares']}\n"
-        f"💵 Precio: {format_price(parsed['price'], buy_ccy)}\n"
-        f"💰 Total: {format_price(total, buy_ccy)}"
+        f"💵 Precio: {format_price(price, buy_ccy)}"
+        + (" _(referencial)_" if is_market_order else "") + "\n"
+        f"💰 Total aprox.: {format_price(total, buy_ccy)}"
+        + ("\n\n⏳ _Las limit orders caducan en 24h. Si no se ejecutan, se reanaliza la acción._" if order_type == "limit" else "")
     )
     try:
         await update.message.reply_text(
@@ -216,7 +244,8 @@ async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     except Exception:
         await update.message.reply_text(
-            text,
+            text.replace("\\.", "."),
+            parse_mode=ParseMode.MARKDOWN,
             reply_markup=keyboard,
         )
 
@@ -230,7 +259,7 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     full_text = update.message.text or ""
     parsed = _parse_buy_sell(full_text)
 
-    if parsed is None:
+    if parsed is None or parsed.get("price") is None:
         await update.message.reply_text(
             "❌ Formato incorrecto.\n\n"
             "*Uso:* `/sell TICKER CANTIDAD PRECIO`\n"
@@ -360,12 +389,14 @@ async def cmd_capital(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         broker = await get_broker_account_cash(mode=mode)
 
         if broker:
+            bccy = broker.get('currency', ACCOUNT_CURRENCY)
+            bsym = get_currency_symbol(bccy)
             text += (
                 f"*{label}*\n"
-                f"  💵 Cash: {broker['cash']:,.2f} {broker.get('currency', '$')}\n"
-                f"  📊 Invertido: {broker['invested']:,.2f}\n"
-                f"  💰 Total: {broker['portfolio_value']:,.2f}\n"
-                f"  📈 PnL: {broker['pnl']:+,.2f} ({broker.get('pnl_pct', 0):+.1f}%)\n"
+                f"  💵 Cash: {broker['cash']:,.2f} {bccy}\n"
+                f"  📊 Invertido: {broker['invested']:,.2f} {bccy}\n"
+                f"  💰 Total: {broker['portfolio_value']:,.2f} {bccy}\n"
+                f"  📈 PnL: {broker['pnl']:+,.2f}{bsym} ({broker.get('pnl_pct', 0):+.1f}%)\n"
             )
             if portfolio:
                 text += f"  🏷 Capital inicial BD: {portfolio.initial_capital or 0:,.2f}\n"

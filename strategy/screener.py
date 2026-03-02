@@ -108,6 +108,7 @@ async def quick_scan(
             return {
                 "ticker": ticker.upper(),
                 "price": fd.current_price,
+                "currency": fd.currency or "USD",
                 "pe": fd.pe_ratio,
                 "sector": fd.sector,
                 "score": vs.overall_score,

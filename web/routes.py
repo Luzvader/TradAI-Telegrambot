@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from config.markets import market_display
+from config.markets import market_display, MARKET_CURRENCY, get_currency_symbol
 from database import repository as repo
 from database.connection import async_session_factory
 from database.models import (
@@ -138,6 +138,8 @@ async def _portfolio_summary(portfolio_id: int) -> dict:
             etf_value += value
         else:
             stock_value += value
+        pos_ccy = MARKET_CURRENCY.get(p.market or "", "USD")
+        pos_ccy_sym = get_currency_symbol(pos_ccy)
         pos_data.append({
             "ticker": p.ticker,
             "market": market_display(p.market or "\u2014"),
@@ -149,6 +151,8 @@ async def _portfolio_summary(portfolio_id: int) -> dict:
             "pnl_abs": pnl["abs"],
             "pnl_pct": pnl["pct"],
             "asset_type": "etf" if is_etf else "stock",
+            "currency": pos_ccy,
+            "currency_symbol": pos_ccy_sym,
         })
     pos_data.sort(key=lambda x: x["pnl_pct"], reverse=True)
 

@@ -9,7 +9,7 @@ from telegram.ext import ContextTypes
 from config.markets import market_display
 from database import repository as repo
 from database.models import AssetType, OperationOrigin, PortfolioType, StrategyType
-from portfolio.portfolio_manager import execute_buy, execute_sell
+from portfolio.portfolio_manager import execute_buy, execute_limit_buy, execute_sell
 from strategy.etf_config import get_all_etf_tickers
 from telegram_bot.handlers.helpers import _escape_md
 
@@ -28,7 +28,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # ── Buy confirm ──
     if data.startswith("buy_confirm:"):
         parts = data.split(":")
-        if len(parts) == 5:
+        order_type = "market"
+        if len(parts) == 6:
+            ticker, market = parts[1], parts[2]
+            shares, price = float(parts[3]), float(parts[4])
+            order_type = parts[5]  # "market" or "limit"
+        elif len(parts) == 5:
             ticker, market = parts[1], parts[2]
             shares, price = float(parts[3]), float(parts[4])
         elif len(parts) == 4:
@@ -44,8 +49,46 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             return
 
         mkt_name = market_display(market)
+
+        # ── LIMIT ORDER ──
+        if order_type == "limit":
+            await query.edit_message_text(
+                f"⏳ Enviando limit order: {shares} {ticker} ({mkt_name}) @ {price}…"
+            )
+            chat_id = str(query.message.chat.id) if query.message else None
+            result = await execute_limit_buy(
+                portfolio_id=portfolio.id,
+                ticker=ticker,
+                limit_price=price,
+                shares=shares,
+                market=market,
+                chat_id=chat_id,
+            )
+            if result["success"]:
+                text = (
+                    f"🎯 *Limit Order registrada*\n\n"
+                    f"📌 Ticker: {_escape_md(ticker)} ({_escape_md(mkt_name)})\n"
+                    f"📊 Acciones: {shares}\n"
+                    f"💵 Precio límite: {price}$\n"
+                    f"🕐 Expira: {_escape_md(result['expires_at'][:19].replace('T', ' '))} UTC\n\n"
+                    f"⏳ _La orden se ejecutará cuando el precio alcance {price}$._\n"
+                    f"_Si no se ejecuta en 24h, se cancelará y se reanaliza la acción._"
+                )
+                if result.get("broker_order_id"):
+                    text += f"\n🏦 Broker: ✅ Orden `{result['broker_order_id']}`"
+                elif result.get("broker_note") and result["broker_note"] != "None":
+                    text += f"\n🏦 Broker: ⚠️ {_escape_md(str(result['broker_note']))}"
+            else:
+                text = f"❌ *Error:* {result.get('error', 'Error desconocido')}"
+            try:
+                await query.edit_message_text(text, parse_mode=ParseMode.MARKDOWN)
+            except Exception:
+                await query.edit_message_text(text)
+            return
+
+        # ── MARKET ORDER ──
         await query.edit_message_text(
-            f"⏳ Comprando {shares} acc de {ticker} ({mkt_name}) a {price}$..."
+            f"⏳ Comprando {shares} acc de {ticker} ({mkt_name}) a precio de mercado…"
         )
 
         # Detectar si es un ETF conocido
@@ -61,12 +104,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             asset_type=detected_asset_type,
         )
 
+        from config.markets import MARKET_CURRENCY, format_price
+        buy_ccy = MARKET_CURRENCY.get(market, "USD")
         if result["success"]:
             text = "✅ *COMPRA ejecutada*\n\n"
             text += f"📌 Ticker: {_escape_md(ticker)} ({_escape_md(mkt_name)})\n"
-            text += f"💵 Precio: {price}$\n"
+            text += f"💵 Precio: {format_price(result.get('price', price), buy_ccy)}\n"
             text += f"📊 Acciones: {result.get('shares', shares):.4f}\n"
-            text += f"💰 Total: {result.get('amount', 0):.2f}$\n"
+            text += f"💰 Total: {format_price(result.get('amount', 0), buy_ccy)}\n"
             if result.get("broker_executed"):
                 text += "🏦 Broker: Trading212 ✅\n"
                 if result.get("broker_order"):
@@ -123,12 +168,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             shares_to_sell=shares,
         )
 
+        from config.markets import MARKET_CURRENCY, format_price
+        sell_ccy = MARKET_CURRENCY.get(market, "USD")
         if result["success"]:
             text = "✅ *VENTA ejecutada*\n\n"
             text += f"📌 Ticker: {_escape_md(ticker)} ({_escape_md(mkt_name)})\n"
-            text += f"💵 Precio: {price}$\n"
+            text += f"💵 Precio: {format_price(result.get('price', price), sell_ccy)}\n"
             text += f"📊 Acciones vendidas: {result.get('shares_sold', shares):.4f}\n"
-            text += f"💰 Total: {result.get('amount', 0):.2f}$\n"
+            text += f"💰 Total: {format_price(result.get('amount', 0), sell_ccy)}\n"
             if result.get("broker_executed"):
                 text += "🏦 Broker: Trading212 ✅\n"
                 if result.get("broker_order"):

@@ -179,6 +179,94 @@ async def execute_buy(
     }
 
 
+async def execute_limit_buy(
+    portfolio_id: int,
+    ticker: str,
+    limit_price: float,
+    shares: float,
+    market: str = "NASDAQ",
+    chat_id: str | None = None,
+    asset_type: AssetType | None = None,
+) -> dict[str, Any]:
+    """
+    Coloca una orden de compra limitada en el broker y la registra
+    como pendiente en la BD.  El portfolio NO se actualiza hasta que
+    el broker confirma la ejecución (ver job_check_pending_limit_orders).
+
+    Si el broker no está disponible, la orden queda registrada igualmente
+    en la BD para seguimiento manual.
+
+    Expiración automática: 24h.  Si no se ejecuta, se cancela en T212 y
+    se re-analiza el ticker para decidir si repetir la orden.
+    """
+    portfolio = await repo.get_portfolio(portfolio_id)
+    if portfolio is None:
+        return {"success": False, "error": "Portfolio no encontrado"}
+
+    # ── Enviar al broker ──
+    broker_order_id: str | None = None
+    broker_note: str | None = None
+
+    # Detectar si es ETF conocido para marcarlo correctamente al registrar la compra
+    if asset_type is None:
+        try:
+            from strategy.etf_config import get_etf_category_for_ticker
+            if get_etf_category_for_ticker(ticker.upper()) is not None:
+                asset_type = AssetType.ETF
+        except Exception:
+            pass
+
+    if portfolio.portfolio_type == PortfolioType.REAL:
+        try:
+            from broker.bridge import broker_buy
+            broker_result = await broker_buy(
+                ticker,
+                shares,
+                limit_price,
+                order_type="limit",
+                limit_price=limit_price,
+                time_validity="GOOD_TILL_CANCEL",
+            )
+            if broker_result.success and broker_result.data:
+                broker_order_id = broker_result.data.order_id
+                logger.info(
+                    f"📋 Limit BUY enviado al broker: {ticker} x{shares} @ {limit_price} "
+                    f"[order_id={broker_order_id}]"
+                )
+            else:
+                broker_note = broker_result.error
+                logger.warning(
+                    f"⚠️ Limit BUY no aceptado por broker ({ticker}): {broker_note}"
+                )
+        except Exception as e:
+            broker_note = str(e)
+            logger.warning(f"⚠️ Error enviando limit BUY al broker ({ticker}): {e}")
+
+    # ── Registrar como orden pendiente ──
+    pending = await repo.create_pending_limit_order(
+        portfolio_id=portfolio_id,
+        ticker=ticker,
+        market=market,
+        shares=shares,
+        limit_price=limit_price,
+        broker_order_id=broker_order_id,
+        chat_id=chat_id,
+        asset_type=asset_type.value if asset_type else None,
+        ttl_hours=24,
+    )
+
+    return {
+        "success": True,
+        "pending_order_id": pending.id,
+        "ticker": ticker,
+        "shares": shares,
+        "limit_price": limit_price,
+        "broker_order_id": broker_order_id,
+        "broker_note": broker_note,
+        "expires_at": pending.expires_at.isoformat(),
+    }
+
+
 async def execute_sell(
     portfolio_id: int,
     ticker: str,

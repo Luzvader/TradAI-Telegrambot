@@ -41,21 +41,33 @@ def resolve_ticker(raw: str) -> tuple[str, str]:
 def _parse_buy_sell(text: str) -> dict[str, Any] | None:
     """
     Parsea un comando de compra/venta:
-      /buy AAPL 10 150.5
+      /buy AAPL 10 150.5          → limit order al precio dado
+      /buy AAPL 10                → market order al precio actual
       /sell MSFT 5 320.0
     Acepta ticker con o sin $.  También funciona con @botname.
+    Acepta coma o punto como separador decimal (185,50 ó 185.50).
+    Ignora símbolos de moneda (€, $) pegados al número.
+    Si no se proporciona precio, ``price`` es None (→ market order).
     """
-    pattern = r"/(?:buy|sell|comprar|vender)(?:@\S+)?\s+\$?([A-Za-z.\-]+)\s+([\d.]+)\s+([\d.]+)"
+    pattern = (
+        r"/(?:buy|sell|comprar|vender)(?:@\S+)?"
+        r"\s+\$?([A-Za-z0-9.\-]+)"
+        r"\s+([\d.,]+)[€$]?"
+        r"(?:\s+([\d.,]+)[€$]?)?"  # precio opcional
+    )
     match = re.search(pattern, text, re.IGNORECASE)
     if not match:
         return None
 
     ticker = match.group(1).upper()
-    shares = float(match.group(2))
-    price = float(match.group(3))
+    # Normaliza separador decimal: acepta tanto coma como punto
+    shares = float(match.group(2).replace(",", "."))
+    price_raw = match.group(3)
+    price: float | None = float(price_raw.replace(",", ".")) if price_raw else None
 
-    if price <= 0 or price > MAX_PRICE:
-        return None
+    if price is not None:
+        if price <= 0 or price > MAX_PRICE:
+            return None
     if shares < MIN_SHARES or shares > MAX_SHARES:
         return None
 
