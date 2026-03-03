@@ -29,10 +29,15 @@ async def scan_opportunities(
     max_results: int = 5,
     portfolio_id: int | None = None,
     strategy: StrategyType | str | None = None,
+    skip_dedup: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Escanea el universo buscando nuevas oportunidades de compra.
     Devuelve las mejores candidatas con sus scores.
+
+    skip_dedup: si True, omite el filtro de señal BUY reciente (24h).
+    Usar en modo auto para que cada ciclo evalúe el universo completo
+    sin que scans anteriores bloqueen nuevas compras.
     """
     if strategy is None:
         if portfolio_id is not None:
@@ -83,8 +88,10 @@ async def scan_opportunities(
                 logger.debug(f"No se pudo validar {vs.ticker} en Trading212: {e}")
                 broker_tradability = {"tradable": None, "reason": str(e)}
 
-        # Deduplicación: saltar si ya hay señal BUY reciente
-        if await repo.has_recent_signal(vs.ticker, SignalType.BUY, hours=24, market=detected_market):
+        # Deduplicación: saltar si ya hay señal BUY reciente.
+        # Se omite con skip_dedup=True (modo auto) para no bloquear el ciclo
+        # cuando el mismo ticker ya fue escaneado en las últimas 24h.
+        if not skip_dedup and await repo.has_recent_signal(vs.ticker, SignalType.BUY, hours=24, market=detected_market):
             logger.debug(f"Señal reciente ya existe para {vs.ticker}, omitiendo oportunidad")
             continue
 
