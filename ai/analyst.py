@@ -15,7 +15,7 @@ from typing import Any
 from openai import AsyncOpenAI, BadRequestError
 
 from config.settings import OPENAI_API_KEY, OPENAI_MODEL
-from config.settings import TRADING212_ANALYSIS_ORIENTED
+from config.settings import ETORO_ANALYSIS_ORIENTED
 from data.news import get_geopolitical_context, get_sector_news
 from data.cache import ai_cache
 from database import repository as repo
@@ -417,30 +417,30 @@ async def analyze_with_context(
             obj_parts.append(f"  Convicción: {obj.conviction}/10 | Horizonte: {obj.time_horizon or 'N/A'}")
         objective_text = "\n".join(obj_parts) + "\n"
 
-    # 3c. Contexto de operabilidad en Trading212 (orienta recomendaciones)
+    # 3c. Contexto de operabilidad en eToro (orienta recomendaciones)
     tradability_text = ""
-    if TRADING212_ANALYSIS_ORIENTED:
+    if ETORO_ANALYSIS_ORIENTED:
         try:
-            from broker.bridge import get_trading212_tradability
+            from broker.bridge import get_etoro_tradability
 
-            tradability = await get_trading212_tradability(ticker, market_norm)
+            tradability = await get_etoro_tradability(ticker, market_norm)
             if tradability.get("tradable") is True:
                 tradability_text = (
-                    "OPERABILIDAD TRADING212:\n"
-                    "  Activo operable en Trading212.\n"
+                    "OPERABILIDAD eToro:\n"
+                    "  Activo operable en eToro.\n"
                 )
             elif tradability.get("tradable") is False:
                 tradability_text = (
-                    "OPERABILIDAD TRADING212:\n"
-                    f"  No operable en Trading212 ({tradability.get('reason', 'sin detalle')}).\n"
+                    "OPERABILIDAD eToro:\n"
+                    f"  No operable en eToro ({tradability.get('reason', 'sin detalle')}).\n"
                 )
             else:
                 tradability_text = (
-                    "OPERABILIDAD TRADING212:\n"
+                    "OPERABILIDAD eToro:\n"
                     f"  No verificado ({tradability.get('reason', 'sin detalle')}).\n"
                 )
         except Exception as e:
-            tradability_text = f"OPERABILIDAD TRADING212:\n  No verificado ({e}).\n"
+            tradability_text = f"OPERABILIDAD eToro:\n  No verificado ({e}).\n"
 
     # 4. Contexto del portfolio (compacto)
     portfolio_text = ""
@@ -479,7 +479,7 @@ Responde con:
 Además:
 1. Riesgos principales (3-5) con impacto y horizonte
 2. Catalizadores (3-5) con timing esperado
-3. Si no es operable en Trading212, indica alternativa operable equivalente
+3. Si no es operable en eToro, indica alternativa operable equivalente
 4. Si hay objetivo previo, evalúa si la tesis sigue vigente
 5. Conclusión ejecutiva en 5-8 bullets (atractivo estructural, motor de crecimiento, principal riesgo, pricing power, edge/desventaja vs sector)
 6. Resumen final en 2-3 frases
@@ -515,7 +515,7 @@ Además:
 3. Riesgos principales (3-5) con impacto (alto/medio/bajo) y horizonte (corto/medio/largo)
 4. Catalizadores (3-5) con timing esperado
 5. Precio objetivo (con rango de escenarios: bear/base/bull)
-6. Si no es operable en Trading212, indica alternativa operable equivalente
+6. Si no es operable en eToro, indica alternativa operable equivalente
 7. Si hay objetivo previo, evalúa si la tesis sigue vigente
 8. Conclusión ejecutiva: atractivo estructural de la industria, motor de crecimiento, principal riesgo, pricing power, edge/desventaja de la empresa vs sector
 9. Resumen en 2-3 frases

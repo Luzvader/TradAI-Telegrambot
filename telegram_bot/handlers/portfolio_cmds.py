@@ -315,20 +315,20 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_capital(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Comando /capital — muestra capital real y demo obtenido de Trading212.
-    /capital sync — fuerza sincronización con T212.
+    Comando /capital — muestra capital real y demo obtenido de eToro.
+    /capital sync — fuerza sincronización con eToro.
     /capital CANTIDAD — establece capital manualmente (fallback).
     """
     args = context.args or []
 
-    # ── /capital sync — forzar sincronización T212 ──
+    # ── /capital sync — forzar sincronización eToro ──
     if args and args[0].lower() == "sync":
-        await update.message.reply_text("🔄 Sincronizando capital con Trading212...")
+        await update.message.reply_text("🔄 Sincronizando capital con eToro...")
         from broker.bridge import sync_all_capitals
         results = await sync_all_capitals()
         text = "💰 *SINCRONIZACIÓN DE CAPITAL*\n\n"
-        mode_labels = {"live": "🟢 REAL (live)", "demo": "🔵 DEMO"}
-        for mode in ("live", "demo"):
+        mode_labels = {"real": "🟢 REAL", "demo": "🔵 DEMO"}
+        for mode in ("real", "demo"):
             r = results.get(mode, {})
             label = mode_labels[mode]
             if r.get("success"):
@@ -371,19 +371,19 @@ async def cmd_capital(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             f"✅ *Capital establecido manualmente*\n\n"
             f"💰 Capital inicial: {amount:,.2f}{acct_sym}\n"
             f"💵 Cash disponible: {amount:,.2f}{acct_sym}\n\n"
-            f"_Usa_ `/capital sync` _para obtenerlo de Trading212._",
+            f"_Usa_ `/capital sync` _para obtenerlo de eToro._",
             parse_mode=ParseMode.MARKDOWN,
         )
         return
 
-    # ── /capital (sin args) — mostrar estado de ambas cuentas T212 ──
+    # ── /capital (sin args) — mostrar estado de ambas cuentas eToro ──
     from broker.bridge import get_broker_account_cash
 
     text = "💰 *CAPITAL*\n\n"
-    mode_labels = {"live": "🟢 REAL (live)", "demo": "🔵 DEMO"}
-    ptype_map = {"live": PortfolioType.REAL, "demo": PortfolioType.BACKTEST}
+    mode_labels = {"real": "🟢 REAL", "demo": "🔵 DEMO"}
+    ptype_map = {"real": PortfolioType.REAL, "demo": PortfolioType.BACKTEST}
 
-    for mode in ("live", "demo"):
+    for mode in ("real", "demo"):
         label = mode_labels[mode]
         portfolio = await repo.get_portfolio_by_type(ptype_map[mode])
         broker = await get_broker_account_cash(mode=mode)
@@ -404,7 +404,7 @@ async def cmd_capital(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         elif portfolio:
             fb_sym = get_currency_symbol(ACCOUNT_CURRENCY)
             text += (
-                f"*{label}* _(T212 no disponible)_\n"
+                f"*{label}* _(eToro no disponible)_\n"
                 f"  Capital inicial: {portfolio.initial_capital or 0:,.2f}{fb_sym}\n"
                 f"  Cash disponible: {portfolio.cash or 0:,.2f}{fb_sym}\n\n"
             )

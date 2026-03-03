@@ -399,7 +399,7 @@ class AnalysisLog(Base):
     tech_summary = Column(Text, nullable=True)
     price_summary = Column(Text, nullable=True)
     ai_analysis = Column(Text, nullable=True)             # Resumen IA (completo)
-    broker_tradable = Column(Boolean, nullable=True)      # T212 tradable?
+    broker_tradable = Column(Boolean, nullable=True)      # eToro tradable?
     deterministic_context = Column(Text, nullable=True)   # Contexto determinista completo
     source = Column(String(20), nullable=False, default="manual")  # manual / auto / scan
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
@@ -457,7 +457,7 @@ class PendingLimitOrder(Base):
 
     Cuando el usuario lanza /buy TICKER CANTIDAD PRECIO se registra aquí
     hasta que el broker la ejecuta o expira (24h).
-    Al expirar se cancela la orden en T212 y se re-analiza la acción.
+    Al expirar se cancela la orden en eToro y se re-analiza la acción.
     """
     __tablename__ = "pending_limit_orders"
 
@@ -467,7 +467,7 @@ class PendingLimitOrder(Base):
     market = Column(String(20), nullable=False, default="NASDAQ")
     shares = Column(Float, nullable=False)
     limit_price = Column(Float, nullable=False)
-    # ID de la orden en Trading212 (puede ser None si broker no está disponible)
+    # ID de la orden en eToro (puede ser None si broker no está disponible)
     broker_order_id = Column(String(100), nullable=True)
     # Chat de Telegram para notificar al usuario (puede ser None)
     chat_id = Column(String(50), nullable=True)

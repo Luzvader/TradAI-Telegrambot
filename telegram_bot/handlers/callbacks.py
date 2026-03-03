@@ -113,7 +113,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             text += f"📊 Acciones: {result.get('shares', shares):.4f}\n"
             text += f"💰 Total: {format_price(result.get('amount', 0), buy_ccy)}\n"
             if result.get("broker_executed"):
-                text += "🏦 Broker: Trading212 ✅\n"
+                text += "🏦 Broker: eToro ✅\n"
                 if result.get("broker_order"):
                     text += f"🧾 Orden: `{result['broker_order']}`\n"
             elif result.get("broker_note"):
@@ -177,7 +177,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             text += f"📊 Acciones vendidas: {result.get('shares_sold', shares):.4f}\n"
             text += f"💰 Total: {format_price(result.get('amount', 0), sell_ccy)}\n"
             if result.get("broker_executed"):
-                text += "🏦 Broker: Trading212 ✅\n"
+                text += "🏦 Broker: eToro ✅\n"
                 if result.get("broker_order"):
                     text += f"🧾 Orden: `{result['broker_order']}`\n"
             elif result.get("broker_note"):
@@ -253,7 +253,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             text += f"📊 Acciones: {result.get('shares', shares):.4f}\n"
             text += f"💰 Total: {result.get('amount', 0):.2f}$\n"
             if result.get("broker_executed"):
-                text += "🏦 Broker: Trading212 ✅\n"
+                text += "🏦 Broker: eToro ✅\n"
         else:
             text = f"❌ *Error:* {result['error']}"
 
@@ -297,7 +297,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             text += f"📊 Acciones: {result.get('shares', shares):.4f}\n"
             text += f"💰 Total: {result.get('amount', 0):.2f}$\n"
             if result.get("broker_executed"):
-                text += "🏦 Broker: Trading212 ✅\n"
+                text += "🏦 Broker: eToro ✅\n"
             if "stop_loss" in result:
                 text += f"\n🛡️ Stop-Loss: {result['stop_loss']}$\n"
                 text += f"🎯 Take-Profit: {result['take_profit']}$\n"
@@ -344,7 +344,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             text += f"📊 Acciones vendidas: {result.get('shares_sold', shares):.4f}\n"
             text += f"💰 Total: {result.get('amount', 0):.2f}$\n"
             if result.get("broker_executed"):
-                text += "🏦 Broker: Trading212 ✅\n"
+                text += "🏦 Broker: eToro ✅\n"
             if "pnl" in result:
                 pnl_emoji = "🟢" if result["pnl"] >= 0 else "🔴"
                 text += f"\n{pnl_emoji} PnL: {result['pnl']:+.2f}$ ({result['pnl_pct']:+.2f}%)\n"

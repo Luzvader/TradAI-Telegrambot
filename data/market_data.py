@@ -3,7 +3,7 @@ Obtención de datos de mercado en tiempo real y históricos con yfinance.
 Todas las llamadas a yfinance se ejecutan en thread pool para no
 bloquear el event loop asyncio.
 
-Cuando Trading212 está configurado, los precios de posiciones del broker
+Cuando eToro está configurado, los precios de posiciones del broker
 se obtienen directamente de la API (más preciso, sin delay de 15min).
 """
 
@@ -26,13 +26,13 @@ from data.cache import price_cache, ticker_info_cache
 
 logger = logging.getLogger(__name__)
 
-# Caché local de precios T212 (se rellena con refresh_broker_prices)
+# Caché local de precios eToro (se rellena con refresh_broker_prices)
 _broker_prices: dict[str, float] = {}
 
 
 async def refresh_broker_prices() -> dict[str, float]:
     """
-    Refresca los precios desde T212 positions (1 sola llamada API).
+    Refresca los precios desde eToro positions (1 sola llamada API).
     Devuelve {TICKER: price} y actualiza caché local.
     """
     global _broker_prices
@@ -45,10 +45,10 @@ async def refresh_broker_prices() -> dict[str, float]:
             for ticker, price in prices.items():
                 cache_key = f"price:{ticker}:auto"
                 price_cache.set(cache_key, price)
-            logger.debug(f"🔄 Precios T212 actualizados: {len(prices)} tickers")
+            logger.debug(f"🔄 Precios eToro actualizados: {len(prices)} tickers")
         return prices
     except Exception as e:
-        logger.debug(f"Error refrescando precios T212: {e}")
+        logger.debug(f"Error refrescando precios eToro: {e}")
         return {}
 
 
@@ -157,11 +157,11 @@ def _sync_get_current_price(ticker: str, market: str | None = None) -> float | N
 async def get_current_price(ticker: str, market: str | None = None) -> float | None:
     """
     Obtiene el precio actual de un ticker (async).
-    Intenta primero desde T212 (si está en posiciones del broker),
+    Intenta primero desde eToro (si está en posiciones del broker),
     luego fallback a yfinance.
     """
     tk = ticker.upper()
-    # T212 broker price (instantáneo, sin llamada API adicional)
+    # eToro broker price (instantáneo, sin llamada API adicional)
     if tk in _broker_prices:
         return _broker_prices[tk]
     return await asyncio.to_thread(_sync_get_current_price, ticker, market)
@@ -174,13 +174,13 @@ async def get_prices_batch(
 ) -> dict[str, float]:
     """
     Obtiene precios actuales para una lista de tickers.
-    1. Primero toma precios de T212 (sin API calls) para los que estén en broker.
+    1. Primero toma precios de eToro (sin API calls) para los que estén en broker.
     2. El resto los obtiene de yfinance con concurrencia limitada.
     """
     prices: dict[str, float] = {}
     tickers = [t.upper() for t in tickers]
 
-    # Fase 1: Precios T212 (gratis, sin llamada API)
+    # Fase 1: Precios eToro (gratis, sin llamada API)
     remaining = []
     for t in tickers:
         if t in _broker_prices:

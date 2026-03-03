@@ -16,7 +16,7 @@ from strategy.screener import screen_universe
 from strategy.selector import get_strategy_analyzer
 
 from config.settings import SCAN_MIN_SCORE
-from config.settings import TRADING212_ANALYSIS_ORIENTED
+from config.settings import ETORO_ANALYSIS_ORIENTED
 from signals.builders import compute_diagnostics, build_signal_justification
 from strategy.etf_config import get_all_etf_tickers
 
@@ -67,20 +67,20 @@ async def scan_opportunities(
         detected_market = vs.market or DEFAULT_TICKER_MARKET.get(normalize_ticker(vs.ticker), "NASDAQ")
 
         broker_tradability: dict[str, Any] = {}
-        if TRADING212_ANALYSIS_ORIENTED:
+        if ETORO_ANALYSIS_ORIENTED:
             try:
-                from broker.bridge import get_trading212_tradability
+                from broker.bridge import get_etoro_tradability
 
-                broker_tradability = await get_trading212_tradability(
+                broker_tradability = await get_etoro_tradability(
                     vs.ticker, detected_market
                 )
                 if broker_tradability.get("tradable") is False:
                     logger.debug(
-                        f"Omitiendo {vs.ticker} en scan: no operable en Trading212"
+                        f"Omitiendo {vs.ticker} en scan: no operable en eToro"
                     )
                     continue
             except Exception as e:
-                logger.debug(f"No se pudo validar {vs.ticker} en Trading212: {e}")
+                logger.debug(f"No se pudo validar {vs.ticker} en eToro: {e}")
                 broker_tradability = {"tradable": None, "reason": str(e)}
 
         # Deduplicación: saltar si ya hay señal BUY reciente

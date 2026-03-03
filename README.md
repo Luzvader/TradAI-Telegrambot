@@ -2,7 +2,7 @@
 
 Bot de señales de inversión que corre 24/7 en un servidor,
 monitoriza mercados en tiempo real y se administra completamente
-por **Telegram**. Opera en modo **broker-first con Trading212**
+por **Telegram**. Opera en modo **broker-first con eToro**
 (demo por defecto): las operaciones reales se ejecutan en la plataforma
 y TradAI mantiene sincronía para análisis, señales y aprendizaje.
 
@@ -13,7 +13,7 @@ y TradAI mantiene sincronía para análisis, señales y aprendizaje.
 | **5 Estrategias** | Value, Growth, Dividend, Balanced, Conservative — cada una con prompt IA adaptado |
 | **Umbrales configurables** | BUY/SELL/SCAN thresholds vía variables de entorno |
 | **Modo Automático** | Scan + análisis + watchlist + resumen diario automáticos |
-| **Trading212 Broker-First** | Compras/ventas reales ejecutadas en Trading212 (modo demo/live) |
+| **eToro Broker-First** | Compras/ventas reales ejecutadas en eToro (modo demo/real) |
 | **Gestión de Riesgos** | Regla del 5% por ticker, 20% por sector, stop-loss/take-profit, trailing stop, ATR |
 | **Cash Tracking** | Seguimiento de capital inicial, cash disponible y NAV |
 | **Indicadores Técnicos** | RSI, MACD, Bollinger Bands, ATR integrados en análisis |
@@ -117,7 +117,7 @@ TradAI/
 ├── broker/
 │   ├── base.py                # Interfaz abstracta de broker
 │   ├── bridge.py              # Puente broker ↔ portfolio
-│   └── trading212.py          # Implementación Trading212 API
+│   └── etoro.py               # Implementación eToro API
 ├── notifications/
 │   └── __init__.py            # Sistema centralizado de notificaciones Telegram
 ├── telegram_bot/
@@ -166,10 +166,8 @@ Edita `.env` con:
 - `TELEGRAM_ALLOWED_USERS` — Tu user ID de Telegram
 - `OPENAI_API_KEY` — Clave de OpenAI
 - `NEWS_API_KEY` — (Opcional) Clave de [NewsAPI](https://newsapi.org)
-- `TRADING212_API_KEY` / `TRADING212_API_SECRET` — Credenciales del broker (modo por defecto)
-- `TRADING212_DEMO_API_KEY` / `TRADING212_DEMO_API_SECRET` — Credenciales cuenta demo (opcional)
-- `TRADING212_LIVE_API_KEY` / `TRADING212_LIVE_API_SECRET` — Credenciales cuenta live (opcional)
-- `TRADING212_MODE=demo` — Modo por defecto (demo/live). Si se configuran DEMO+LIVE, ambos se usan
+- `ETORO_API_KEY` / `ETORO_USER_KEY` — Credenciales del broker eToro
+- `ETORO_MODE=demo` — Modo por defecto (demo/real).
 
 ### 3. Arrancar con Docker (recomendado)
 
@@ -206,10 +204,10 @@ python main.py
 ### Broker
 | Comando | Descripción |
 |---|---|
-| `/broker` | Estado de conexión con Trading212 |
+| `/broker` | Estado de conexión con eToro |
 | `/broker sync` | Sincronizar posiciones desde el broker |
 | `/broker import` | Importar historial de operaciones |
-| `/broker buscar TICKER` | Buscar instrumento en Trading212 |
+| `/broker buscar TICKER` | Buscar instrumento en eToro |
 | `/broker historial` | Ver historial de órdenes ejecutadas |
 
 ### Análisis

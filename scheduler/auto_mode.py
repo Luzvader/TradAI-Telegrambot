@@ -99,7 +99,7 @@ async def _process_auto_portfolio(config, now: datetime) -> None:
         await _check_daily_summary(config, now)
         return
 
-    # ── Sync con Trading212 al inicio de cada ciclo (siempre en día de trading) ──
+    # ── Sync con eToro al inicio de cada ciclo (siempre en día de trading) ──
     await _auto_sync_broker(portfolio_id)
 
     # ── Scan de oportunidades (solo con mercados abiertos) ──
@@ -218,14 +218,14 @@ def _should_run_macro_session(config, now: datetime, session: str) -> bool:
 
 async def _auto_sync_broker(portfolio_id: int) -> None:
     """
-    Sincroniza precios y cash desde Trading212 al inicio del ciclo auto.
+    Sincroniza precios y cash desde eToro al inicio del ciclo auto.
     Silencioso: no notifica al usuario, solo actualiza datos internos.
     """
     try:
-        # Refrescar precios T212 para que get_prices_batch los use
+        # Refrescar precios eToro para que get_prices_batch los use
         await refresh_broker_prices()
     except Exception as e:
-        logger.debug(f"[AUTO] Error refrescando precios T212: {e}")
+        logger.debug(f"[AUTO] Error refrescando precios eToro: {e}")
 
     try:
         # Sincronizar cash real del broker con la BD local
@@ -517,7 +517,7 @@ async def _auto_execute_buy(portfolio_id: int, signal: dict) -> None:
                 f"💰 Total: {format_price(result.get('amount', 0), buy_ccy)}\n"
             )
             if result.get("broker_executed"):
-                text += "🏦 Broker: Trading212 ✅\n"
+                text += "🏦 Broker: eToro ✅\n"
             await _notify(text)
         else:
             logger.error(f"[AUTO-ON] Error comprando {ticker}: {result.get('error')}")
@@ -570,7 +570,7 @@ async def _auto_execute_sell(portfolio_id: int, signal: dict) -> None:
                 f"{pnl_emoji} PnL: {pnl:+.2f}{sell_sym} ({pnl_pct:+.2f}%)\n"
             )
             if result.get("broker_executed"):
-                text += "🏦 Broker: Trading212 ✅\n"
+                text += "🏦 Broker: eToro ✅\n"
             await _notify(text)
         else:
             logger.error(f"[AUTO-ON] Error vendiendo {ticker}: {result.get('error')}")
@@ -781,7 +781,7 @@ async def _auto_execute_etf_buy(portfolio_id: int, recommendation: dict) -> None
                 f"🎯 Complementariedad: {recommendation.get('complementarity', 0):.0f}%\n"
             )
             if result.get("broker_executed"):
-                text += "🏦 Broker: Trading212 ✅\n"
+                text += "🏦 Broker: eToro ✅\n"
             await _notify(text)
         else:
             logger.error(f"[AUTO-ETF] Error comprando {ticker}: {result.get('error')}")
@@ -905,11 +905,11 @@ async def _send_daily_summary(portfolio_id: int) -> None:
         f"   Posiciones: {summary['num_positions']}\n"
     )
 
-    # Datos de cuenta T212 (cash real, PnL real)
+    # Datos de cuenta eToro (cash real, PnL real)
     broker_acc = await get_broker_account_cash()
     if broker_acc:
         text += (
-            f"\n🏦 *Trading212 ({broker_acc.get('currency', 'EUR')})*\n"
+            f"\n🏦 *eToro ({broker_acc.get('currency', 'USD')})*\n"
             f"   Cash real: {broker_acc['cash']:,.2f}\n"
             f"   Invertido: {broker_acc['invested']:,.2f}\n"
             f"   Valor total: {broker_acc['portfolio_value']:,.2f}\n"

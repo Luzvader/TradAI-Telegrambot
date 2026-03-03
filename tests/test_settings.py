@@ -41,14 +41,14 @@ def test_broker_and_backtest_flags_types():
         BACKTEST_CONTINUOUS_ENABLED,
         BACKTEST_INTERVAL_MINUTES,
         BACKTEST_MAX_TICKERS,
-        TRADING212_ANALYSIS_ORIENTED,
-        TRADING212_AUTO_EXECUTE,
-        TRADING212_REQUIRE_EXECUTION,
+        ETORO_ANALYSIS_ORIENTED,
+        ETORO_AUTO_EXECUTE,
+        ETORO_REQUIRE_EXECUTION,
     )
 
-    assert isinstance(TRADING212_AUTO_EXECUTE, bool)
-    assert isinstance(TRADING212_REQUIRE_EXECUTION, bool)
-    assert isinstance(TRADING212_ANALYSIS_ORIENTED, bool)
+    assert isinstance(ETORO_AUTO_EXECUTE, bool)
+    assert isinstance(ETORO_REQUIRE_EXECUTION, bool)
+    assert isinstance(ETORO_ANALYSIS_ORIENTED, bool)
     assert isinstance(BACKTEST_CONTINUOUS_ENABLED, bool)
     assert isinstance(BACKTEST_INTERVAL_MINUTES, int)
     assert isinstance(BACKTEST_MAX_TICKERS, int)

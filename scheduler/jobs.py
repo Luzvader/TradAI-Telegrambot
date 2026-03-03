@@ -141,12 +141,12 @@ def init_scheduler(telegram_bot: Bot | None = None) -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # ── Cada 30 min: sync posiciones/cash desde Trading212 ──
+    # ── Cada 30 min: sync posiciones/cash desde eToro ──
     scheduler.add_job(
         job_sync_broker,
         IntervalTrigger(minutes=30),
         id="sync_broker",
-        name="Sync Trading212",
+        name="Sync eToro",
         replace_existing=True,
     )
 
@@ -159,12 +159,12 @@ def init_scheduler(telegram_bot: Bot | None = None) -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # ── Cada día a las 10:00: registrar dividendos cobrados desde T212 ──
+    # ── Cada día a las 10:00: registrar dividendos cobrados desde eToro ──
     scheduler.add_job(
-        job_check_dividends_t212,
+        job_check_dividends_etoro,
         CronTrigger(hour=10, minute=0),
-        id="check_dividends_t212",
-        name="Dividendos T212",
+        id="check_dividends_etoro",
+        name="Dividendos eToro",
         replace_existing=True,
     )
 
@@ -208,7 +208,7 @@ async def job_monitor_prices() -> None:
     """
     Actualiza precios de todas las posiciones abiertas.
     Solo ejecuta si al menos un mercado relevante está abierto.
-    Para cartera REAL, usa precios T212 (1 llamada) + yfinance como fallback.
+    Para cartera REAL, usa precios eToro (1 llamada) + yfinance como fallback.
     """
     # Comprobar si algún mercado está abierto
     any_open = False
@@ -223,12 +223,12 @@ async def job_monitor_prices() -> None:
 
     logger.info("📊 Monitorizando precios...")
 
-    # Refrescar precios T212 antes de actualizar (1 sola llamada API)
+    # Refrescar precios eToro antes de actualizar (1 sola llamada API)
     try:
         from data.market_data import refresh_broker_prices
         await refresh_broker_prices()
     except Exception as e:
-        logger.debug(f"Error refrescando precios T212: {e}")
+        logger.debug(f"Error refrescando precios eToro: {e}")
 
     # Actualizar cartera real
     real = await repo.get_portfolio_by_type(PortfolioType.REAL)
@@ -525,7 +525,7 @@ async def job_weekly_benchmark() -> None:
 
 async def job_portfolio_snapshot() -> None:
     """Guarda un snapshot diario del portfolio para tracking histórico.
-    Solo en días de mercado. Incluye datos de cuenta T212."""
+    Solo en días de mercado. Incluye datos de cuenta eToro."""
     if not is_any_trading_day():
         return
 
@@ -535,7 +535,7 @@ async def job_portfolio_snapshot() -> None:
     if real is None:
         return
 
-    # Refrescar precios T212 antes del snapshot
+    # Refrescar precios eToro antes del snapshot
     try:
         from data.market_data import refresh_broker_prices
         await refresh_broker_prices()
@@ -552,7 +552,7 @@ async def job_portfolio_snapshot() -> None:
     except Exception as e:
         logger.debug(f"Error obteniendo benchmark SPY: {e}")
 
-    # Usar cash real de T212 si está disponible
+    # Usar cash real de eToro si está disponible
     cash = summary.get("cash", 0)
     try:
         from broker.bridge import get_broker_account_cash
@@ -577,9 +577,9 @@ async def job_portfolio_snapshot() -> None:
 
 async def job_sync_broker() -> None:
     """
-    Sincronización periódica con Trading212:
+    Sincronización periódica con eToro:
     1. Refresca precios de posiciones del broker
-    2. Sincroniza cash de AMBAS cuentas (live→REAL, demo→BACKTEST)
+    2. Sincroniza cash de AMBAS cuentas (real→REAL, demo→BACKTEST)
     3. Detecta discrepancias entre broker y BD que puedan indicar
        operaciones manuales fuera de TradAI
     """
@@ -597,7 +597,7 @@ async def job_sync_broker() -> None:
         # 1. Refrescar precios
         await refresh_broker_prices()
 
-        # 2. Sync cash de ambas cuentas T212
+        # 2. Sync cash de ambas cuentas eToro
         cap_results = await sync_all_capitals()
         for mode, r in cap_results.items():
             if r.get("success") and abs(r.get("diff", 0)) > 5.0:
@@ -620,7 +620,7 @@ async def job_sync_broker() -> None:
                 if len(only_broker) >= 2:
                     text = (
                         f"🔄 *SYNC BROKER*\n\n"
-                        f"Detectadas {len(only_broker)} posiciones solo en Trading212 "
+                        f"Detectadas {len(only_broker)} posiciones solo en eToro "
                         f"(no en TradAI):\n"
                     )
                     for p in only_broker[:5]:
@@ -632,9 +632,9 @@ async def job_sync_broker() -> None:
         logger.error(f"Error en job_sync_broker: {e}")
 
 
-async def job_check_dividends_t212() -> None:
+async def job_check_dividends_etoro() -> None:
     """
-    Registra automáticamente dividendos cobrados desde Trading212.
+    Registra automáticamente dividendos cobrados desde eToro.
     Se ejecuta diariamente en días de mercado para detectar nuevos dividendos.
     """
     if not is_any_trading_day():
@@ -649,15 +649,15 @@ async def job_check_dividends_t212() -> None:
     try:
         recorded = await check_and_record_dividends(real.id)
         if recorded:
-            t212_divs = [d for d in recorded if d.get("source") == "T212"]
+            etoro_divs = [d for d in recorded if d.get("source") == "eToro"]
             yf_divs = [d for d in recorded if d.get("source") == "yfinance"]
 
             text = f"💰 *DIVIDENDOS DETECTADOS ({len(recorded)})*\n\n"
 
             div_sym = get_currency_symbol(ACCOUNT_CURRENCY)
-            if t212_divs:
-                text += "🏦 *Trading212 (confirmados):*\n"
-                for d in t212_divs[:10]:
+            if etoro_divs:
+                text += "🏦 *eToro (confirmados):*\n"
+                for d in etoro_divs[:10]:
                     text += (
                         f"  {d['ticker']}: {d['total']:.2f}{div_sym} "
                         f"({d['shares']:.2f} acc × {d['amount_per_share']:.4f}{div_sym})\n"
@@ -675,9 +675,9 @@ async def job_check_dividends_t212() -> None:
             total = sum(d["total"] for d in recorded)
             text += f"\n💵 Total: {total:,.2f}{div_sym}"
             await _notify(text)
-            logger.info(f"💰 {len(recorded)} dividendos registrados (T212: {len(t212_divs)}, yf: {len(yf_divs)})")
+            logger.info(f"💰 {len(recorded)} dividendos registrados (eToro: {len(etoro_divs)}, yf: {len(yf_divs)})")
     except Exception as e:
-        logger.error(f"Error en job_check_dividends_t212: {e}")
+        logger.error(f"Error en job_check_dividends_etoro: {e}")
 
 
 async def job_check_custom_alerts() -> None:
@@ -997,7 +997,7 @@ async def job_check_pending_limit_orders() -> None:
     Para cada orden PENDING:
       • Si el broker la marcó como FILLED → registra la compra en el portfolio
         y notifica al usuario.
-      • Si han pasado 24h y sigue sin ejecutarse → cancela la orden en T212,
+      • Si han pasado 24h y sigue sin ejecutarse → cancela la orden en eToro,
         la marca como EXPIRED, re-analiza el ticker con IA y notifica.
     """
     from datetime import UTC, datetime
@@ -1021,37 +1021,36 @@ async def job_check_pending_limit_orders() -> None:
             filled = False
             filled_price: float | None = None
 
-            # ── Consultar estado en T212 ──
+            # ── Consultar estado en eToro ──
             if order.broker_order_id:
                 try:
-                    from broker.trading212 import get_trading212_client
-                    client = get_trading212_client()
+                    from broker.etoro import get_etoro_client
+                    client = get_etoro_client()
                     if client:
                         result = await client.get_order_by_id(order.broker_order_id)
 
-                        t212_order = result.data if result.success and result.data else None
-                        # /equity/orders/{id} solo contempla órdenes pendientes.
+                        etoro_order = result.data if result.success and result.data else None
                         # Si devuelve 404, buscar en histórico para capturar FILLED.
-                        if t212_order is None and (
+                        if etoro_order is None and (
                             not result.success and "HTTP 404" in (result.error or "")
                         ):
                             history_result = await client.get_historical_order_by_id(
                                 order.broker_order_id
                             )
                             if history_result.success and history_result.data:
-                                t212_order = history_result.data
+                                etoro_order = history_result.data
 
-                        if t212_order:
-                            status = getattr(t212_order, "status", "").upper()
+                        if etoro_order:
+                            status = getattr(etoro_order, "status", "").upper()
                             if status in ("FILLED", "EXECUTED"):
                                 filled = True
                                 filled_price = float(
-                                    getattr(t212_order, "filled_price", None)
-                                    or getattr(t212_order, "price", None)
+                                    getattr(etoro_order, "filled_price", None)
+                                    or getattr(etoro_order, "price", None)
                                     or order.limit_price
                                 )
                 except Exception as e:
-                    logger.debug(f"Error consultando orden {order.broker_order_id} en T212: {e}")
+                    logger.debug(f"Error consultando orden {order.broker_order_id} en eToro: {e}")
 
             # ── Orden ejecutada ──
             if filled:
@@ -1105,13 +1104,13 @@ async def job_check_pending_limit_orders() -> None:
                     f"(order_id={order.id})"
                 )
 
-                # Cancelar en T212
+                # Cancelar en eToro
                 if order.broker_order_id:
                     try:
                         await broker_cancel_order(order.broker_order_id)
                     except Exception as e:
                         logger.warning(
-                            f"No se pudo cancelar la orden {order.broker_order_id} en T212: {e}"
+                            f"No se pudo cancelar la orden {order.broker_order_id} en eToro: {e}"
                         )
 
                 await repo.mark_limit_order_expired(order.id)
