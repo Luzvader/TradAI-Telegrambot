@@ -1,7 +1,7 @@
 """
 Servicio de detección y registro de dividendos.
 
-Fuente primaria: Trading212 API (dividendos realmente cobrados, datos exactos).
+Fuente primaria: eToro API (dividendos realmente cobrados, datos exactos).
 Fuente secundaria: yfinance (estimaciones, para posiciones no en broker).
 """
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 async def check_and_record_dividends(portfolio_id: int) -> list[dict[str, Any]]:
     """
     Revisa dividendos usando dos fuentes:
-    1. Trading212 API: dividendos realmente cobrados (datos exactos)
+    1. eToro API: dividendos realmente cobrados (datos exactos)
     2. yfinance: fallback para posiciones no en el broker
 
     Returns:
@@ -30,11 +30,11 @@ async def check_and_record_dividends(portfolio_id: int) -> list[dict[str, Any]]:
     """
     recorded: list[dict[str, Any]] = []
 
-    # ── Fase 1: Dividendos reales desde Trading212 ──
+    # ── Fase 1: Dividendos reales desde eToro ──
     try:
         from broker.bridge import get_broker_dividend_history
-        t212_divs = await get_broker_dividend_history(limit=100)
-        if t212_divs:
+        etoro_divs = await get_broker_dividend_history(limit=100)
+        if etoro_divs:
             existing = await repo.get_dividends_for_portfolio(
                 portfolio_id, since_days=365,
             )
@@ -47,7 +47,7 @@ async def check_and_record_dividends(portfolio_id: int) -> list[dict[str, Any]]:
                 )
                 existing_keys.add(key)
 
-            for div in t212_divs:
+            for div in etoro_divs:
                 ticker = div.get("ticker", "").upper()
                 amount = div.get("amount", 0)
                 quantity = div.get("quantity", 0)
@@ -80,7 +80,7 @@ async def check_and_record_dividends(portfolio_id: int) -> list[dict[str, Any]]:
                     market="NASDAQ",  # se infiere después si es necesario
                     amount_per_share=amount_per_share,
                     shares_held=quantity,
-                    currency=ACCOUNT_CURRENCY,  # T212 paga en la divisa de la cuenta
+                    currency=ACCOUNT_CURRENCY,  # eToro paga en USD
                     ex_date=pay_date,
                     pay_date=pay_date,
                 )
@@ -91,22 +91,22 @@ async def check_and_record_dividends(portfolio_id: int) -> list[dict[str, Any]]:
                     "shares": quantity,
                     "total": dp.total_amount,
                     "ex_date": str(pay_date.date()),
-                    "source": "T212",
+                    "source": "eToro",
                 })
                 logger.info(
-                    f"💰 Dividendo T212: {ticker} "
+                    f"💰 Dividendo eToro: {ticker} "
                     f"{format_price(amount, ACCOUNT_CURRENCY)} ({quantity:.2f} acc)"
                 )
     except Exception as e:
-        logger.warning(f"Error obteniendo dividendos de T212: {e}")
+        logger.warning(f"Error obteniendo dividendos de eToro: {e}")
 
-    # ── Fase 2: yfinance para posiciones no cubiertas por T212 ──
+    # ── Fase 2: yfinance para posiciones no cubiertas por eToro ──
     positions = list(await repo.get_open_positions(portfolio_id))
-    t212_tickers = {d["ticker"].upper() for d in recorded}
+    etoro_tickers = {d["ticker"].upper() for d in recorded}
 
     for pos in positions:
-        if pos.ticker.upper() in t212_tickers:
-            continue  # ya registrado desde T212
+        if pos.ticker.upper() in etoro_tickers:
+            continue  # ya registrado desde eToro
         try:
             divs = await _get_recent_dividends(pos.ticker, pos.market)
             if not divs:

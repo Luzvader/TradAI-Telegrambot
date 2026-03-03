@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from config.markets import DEFAULT_TICKER_MARKET, normalize_ticker, split_yfinance_suffix, MARKET_CURRENCY
-from config.settings import TRADING212_ANALYSIS_ORIENTED
+from config.settings import ETORO_ANALYSIS_ORIENTED
 from data.fundamentals import fetch_fundamentals
 from data.technical import get_technical_analysis
 from database import repository as repo
@@ -82,12 +82,12 @@ async def analyze_ticker(
         logger.debug(f"Error en diagnóstico de precio de {ticker}: {e}")
 
     broker_tradability: dict[str, Any] = {}
-    if TRADING212_ANALYSIS_ORIENTED:
+    if ETORO_ANALYSIS_ORIENTED:
         try:
-            from broker.bridge import get_trading212_tradability
-            broker_tradability = await get_trading212_tradability(ticker, resolved_market)
+            from broker.bridge import get_etoro_tradability
+            broker_tradability = await get_etoro_tradability(ticker, resolved_market)
         except Exception as e:
-            logger.debug(f"No se pudo validar {ticker} en Trading212: {e}")
+            logger.debug(f"No se pudo validar {ticker} en eToro: {e}")
             broker_tradability = {"tradable": None, "reason": str(e)}
 
     return {

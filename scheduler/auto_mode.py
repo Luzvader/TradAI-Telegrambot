@@ -99,7 +99,7 @@ async def _process_auto_portfolio(config, now: datetime) -> None:
         await _check_daily_summary(config, now)
         return
 
-    # ── Sync con Trading212 al inicio de cada ciclo (siempre en día de trading) ──
+    # ── Sync con eToro al inicio de cada ciclo (siempre en día de trading) ──
     await _auto_sync_broker(portfolio_id)
 
     # ── Scan de oportunidades (solo con mercados abiertos) ──
@@ -218,32 +218,27 @@ def _should_run_macro_session(config, now: datetime, session: str) -> bool:
 
 async def _auto_sync_broker(portfolio_id: int) -> None:
     """
-    Sincroniza precios y cash desde Trading212 al inicio del ciclo auto.
+    Sincroniza precios y cash desde eToro al inicio del ciclo auto.
     Silencioso: no notifica al usuario, solo actualiza datos internos.
     """
     try:
-        # Refrescar precios T212 para que get_prices_batch los use
+        # Refrescar precios eToro para que get_prices_batch los use
         await refresh_broker_prices()
     except Exception as e:
-        logger.warning(f"[AUTO] Error refrescando precios T212: {e}")
+        logger.debug(f"[AUTO] Error refrescando precios eToro: {e}")
 
     try:
         # Sincronizar cash real del broker con la BD local
         portfolio = await repo.get_portfolio(portfolio_id)
         if portfolio and portfolio.portfolio_type == PortfolioType.REAL:
             result = await sync_cash_from_broker(portfolio_id)
-            if result.get("success"):
-                if abs(result.get("diff", 0)) > 1.0:
-                    logger.info(
-                        f"[AUTO] Cash sincronizado: "
-                        f"{result['old_cash']:.2f} → {result['new_cash']:.2f}"
-                    )
-            else:
-                logger.warning(
-                    f"[AUTO] No se pudo sincronizar cash del broker: {result.get('error')}"
+            if result.get("success") and abs(result.get("diff", 0)) > 1.0:
+                logger.info(
+                    f"[AUTO] Cash sincronizado: "
+                    f"{result['old_cash']:.2f} → {result['new_cash']:.2f}"
                 )
     except Exception as e:
-        logger.warning(f"[AUTO] Error sincronizando cash: {e}")
+        logger.debug(f"[AUTO] Error sincronizando cash: {e}")
 
 
 async def _auto_scan(portfolio_id: int, mode: AutoModeType) -> None:
@@ -256,24 +251,14 @@ async def _auto_scan(portfolio_id: int, mode: AutoModeType) -> None:
 
     try:
         opportunities = await scan_opportunities(
-            max_results=5,
-            portfolio_id=portfolio_id,
-            skip_dedup=True,  # El modo auto no usa dedup: evalúa el universo completo cada ciclo
+            max_results=5, portfolio_id=portfolio_id
         )
         if not opportunities:
-            logger.info(f"[AUTO] Scan completado: sin oportunidades (score < {settings.SCAN_MIN_SCORE})")
             return
 
-        # Filtrar solo señales BUY (overall_score >= SIGNAL_BUY_THRESHOLD está implícito
-        # en signal=="BUY" por definición de StrategyScore.signal)
-        strong = [o for o in opportunities if o["signal"] == "BUY"]
+        # Filtrar solo BUY con score alto
+        strong = [o for o in opportunities if o["signal"] == "BUY" and o["overall_score"] >= settings.SIGNAL_BUY_THRESHOLD]
         if not strong:
-            below = [o for o in opportunities]
-            tickers_str = ", ".join(f"{o['ticker']} ({o['overall_score']:.0f})" for o in below[:5])
-            logger.info(
-                f"[AUTO] Scan completado: {len(below)} candidatos pero ninguno con señal BUY. "
-                f"Top scores: {tickers_str}"
-            )
             return
 
         # ── Persistir análisis de scan para aprendizaje ──
@@ -318,12 +303,11 @@ async def _auto_scan(portfolio_id: int, mode: AutoModeType) -> None:
             )
 
         if mode == AutoModeType.ON:
-            # Full auto: notificar primero el listado de oportunidades,
-            # luego las compras individuales (cada una envía su propia confirmación)
-            text += "_Iniciando compras automáticas..._\n"
-            await _notify(text)
+            # Full auto: ejecutar compras y notificar resultado
             for opp in strong:
                 await _auto_execute_buy(portfolio_id, opp)
+            text += "_Operaciones ejecutadas automáticamente._\n"
+            await _notify(text)
 
         elif mode == AutoModeType.SAFE:
             # Safe: enviar cada oportunidad con botones de confirmación
@@ -483,24 +467,19 @@ async def _auto_execute_buy(portfolio_id: int, signal: dict) -> None:
     # Guard: no operar si el mercado del ticker está cerrado
     if not is_market_open(market):
         logger.info(f"[AUTO-ON] Mercado {market} cerrado, compra de {ticker} aplazada")
-        await _notify(f"🤖 ⏸️ AUTO-ON — Mercado *{market}* cerrado, compra de *{ticker}* aplazada")
         return
 
     try:
         # Calcular tamaño de posición basado en el portfolio
         portfolio = await repo.get_portfolio(portfolio_id)
         if portfolio is None or portfolio.cash <= 0:
-            cash_val = portfolio.cash if portfolio else 0
-            logger.warning(f"[AUTO-ON] Sin cash disponible para comprar {ticker} (cash={cash_val})")
-            await _notify(f"🤖 ⚠️ AUTO-ON — Sin cash disponible para comprar *{ticker}* (cash={cash_val:.2f})")
+            logger.warning(f"[AUTO-ON] Sin cash disponible para comprar {ticker}")
             return
 
         # ── Sizing inteligente: respetar split stocks/ETFs ──
-        # Usar total_with_cash como base: incluye posiciones + efectivo.
-        # Esto es crítico para carteras nuevas sin posiciones abiertas,
-        # donde total_value (solo posiciones) sería 0.
+        # El presupuesto de acciones es el total menos la reserva para ETFs
         summary = await get_portfolio_summary(portfolio_id)
-        total_value = summary["total_with_cash"]  # posiciones + cash
+        total_value = summary["total_value"]
 
         try:
             from strategy.etf_config import get_etf_config
@@ -516,16 +495,6 @@ async def _auto_execute_buy(portfolio_id: int, signal: dict) -> None:
             stock_budget * 0.05,  # 5% del presupuesto de acciones
         )
         if max_amount < 10:
-            logger.warning(
-                f"[AUTO-ON] Importe insuficiente para comprar {ticker}: "
-                f"max_amount={max_amount:.2f} (cash={portfolio.cash:.2f}, "
-                f"total_with_cash={total_value:.2f}, stock_budget={stock_budget:.2f})"
-            )
-            await _notify(
-                f"🤖 ⚠️ AUTO-ON — Importe insuficiente para comprar *{ticker}*\n"
-                f"Cash: {portfolio.cash:.2f} | Portfolio: {total_value:.2f} | "
-                f"Presupuesto acciones: {stock_budget:.2f} | Máx orden: {max_amount:.2f}"
-            )
             return
 
         shares = max_amount / price
@@ -548,7 +517,7 @@ async def _auto_execute_buy(portfolio_id: int, signal: dict) -> None:
                 f"💰 Total: {format_price(result.get('amount', 0), buy_ccy)}\n"
             )
             if result.get("broker_executed"):
-                text += "🏦 Broker: Trading212 ✅\n"
+                text += "🏦 Broker: eToro ✅\n"
             await _notify(text)
         else:
             logger.error(f"[AUTO-ON] Error comprando {ticker}: {result.get('error')}")
@@ -601,7 +570,7 @@ async def _auto_execute_sell(portfolio_id: int, signal: dict) -> None:
                 f"{pnl_emoji} PnL: {pnl:+.2f}{sell_sym} ({pnl_pct:+.2f}%)\n"
             )
             if result.get("broker_executed"):
-                text += "🏦 Broker: Trading212 ✅\n"
+                text += "🏦 Broker: eToro ✅\n"
             await _notify(text)
         else:
             logger.error(f"[AUTO-ON] Error vendiendo {ticker}: {result.get('error')}")
@@ -629,9 +598,7 @@ async def _send_buy_confirmation(portfolio_id: int, signal: dict) -> None:
         if portfolio is None or portfolio.cash <= 0:
             return
         summary = await get_portfolio_summary(portfolio_id)
-        # Usar total_with_cash: incluye cash + posiciones, correcto para
-        # carteras nuevas sin posiciones registradas aún.
-        amount = min(portfolio.cash, summary["total_with_cash"] * 0.05)
+        amount = min(portfolio.cash, summary["total_value"] * 0.05)
         shares = amount / price
     except Exception:
         shares = 0
@@ -814,7 +781,7 @@ async def _auto_execute_etf_buy(portfolio_id: int, recommendation: dict) -> None
                 f"🎯 Complementariedad: {recommendation.get('complementarity', 0):.0f}%\n"
             )
             if result.get("broker_executed"):
-                text += "🏦 Broker: Trading212 ✅\n"
+                text += "🏦 Broker: eToro ✅\n"
             await _notify(text)
         else:
             logger.error(f"[AUTO-ETF] Error comprando {ticker}: {result.get('error')}")
@@ -938,11 +905,11 @@ async def _send_daily_summary(portfolio_id: int) -> None:
         f"   Posiciones: {summary['num_positions']}\n"
     )
 
-    # Datos de cuenta T212 (cash real, PnL real)
+    # Datos de cuenta eToro (cash real, PnL real)
     broker_acc = await get_broker_account_cash()
     if broker_acc:
         text += (
-            f"\n🏦 *Trading212 ({broker_acc.get('currency', 'EUR')})*\n"
+            f"\n🏦 *eToro ({broker_acc.get('currency', 'USD')})*\n"
             f"   Cash real: {broker_acc['cash']:,.2f}\n"
             f"   Invertido: {broker_acc['invested']:,.2f}\n"
             f"   Valor total: {broker_acc['portfolio_value']:,.2f}\n"

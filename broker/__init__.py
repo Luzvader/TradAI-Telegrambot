@@ -1,4 +1,4 @@
 """
 Módulo broker – integración con brokers para ejecución real de operaciones.
-Actualmente soporta Trading212 API.
+Actualmente soporta eToro API (https://api-portal.etoro.com/).
 """

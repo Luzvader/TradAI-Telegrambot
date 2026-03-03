@@ -1,13 +1,15 @@
 """
-Handlers de comandos de Telegram para Trading212 broker.
+Handlers de comandos de Telegram para eToro broker.
 
 Comandos:
   /broker              — Estado del broker (cuenta, posiciones, órdenes)
   /broker sync         — Sincronizar posiciones broker ↔ BD local
   /broker import       — Importar posiciones del broker a la BD local
-  /broker buscar TICK  — Buscar instrumento en Trading212
-  /broker historial    — Historial de órdenes ejecutadas
+  /broker buscar TICK  — Buscar instrumento en eToro
+  /broker ordenes      — Órdenes pendientes
   /broker cancelar ID  — Cancelar orden pendiente
+  /broker dividendos   — Historial dividendos
+  /broker cash         — Detalle de cash
 """
 
 import logging
@@ -17,11 +19,11 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from config.settings import (
-    TRADING212_API_KEY,
-    TRADING212_API_SECRET,
-    TRADING212_AUTO_EXECUTE,
-    TRADING212_REQUIRE_EXECUTION,
-    TRADING212_MODE,
+    ETORO_API_KEY,
+    ETORO_USER_KEY,
+    ETORO_AUTO_EXECUTE,
+    ETORO_REQUIRE_EXECUTION,
+    ETORO_MODE,
 )
 from telegram_bot.handlers.helpers import _send_long
 from telegram_bot.handlers.registry import CommandInfo
@@ -31,19 +33,19 @@ logger = logging.getLogger(__name__)
 
 async def cmd_broker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    /broker — Comando principal del broker Trading212.
+    /broker — Comando principal del broker eToro.
     Sin argumentos muestra el estado general.
     """
-    if not TRADING212_API_KEY or not TRADING212_API_SECRET:
+    if not ETORO_API_KEY or not ETORO_USER_KEY:
         await update.message.reply_text(
-            "⚠️ *Trading212 no configurado*\n\n"
+            "⚠️ *eToro no configurado*\n\n"
             "Añade en `.env`:\n"
             "```\n"
-            "TRADING212_API_KEY=tu_api_key\n"
-            "TRADING212_API_SECRET=tu_api_secret\n"
-            "TRADING212_MODE=demo\n"
-            "TRADING212_AUTO_EXECUTE=true\n"
-            "TRADING212_REQUIRE_EXECUTION=true\n"
+            "ETORO_API_KEY=tu_api_key\n"
+            "ETORO_USER_KEY=tu_user_key\n"
+            "ETORO_MODE=demo\n"
+            "ETORO_AUTO_EXECUTE=true\n"
+            "ETORO_REQUIRE_EXECUTION=true\n"
             "```",
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -59,17 +61,13 @@ async def cmd_broker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     elif args[0].lower() in ("buscar", "search"):
         query = " ".join(args[1:]) if len(args) > 1 else ""
         await _broker_search(update, query)
-    elif args[0].lower() in ("historial", "history"):
-        await _broker_history(update)
+    elif args[0].lower() in ("ordenes", "orders"):
+        await _broker_orders(update)
     elif args[0].lower() in ("cancelar", "cancel"):
         order_id = args[1] if len(args) > 1 else ""
         await _broker_cancel(update, order_id)
-    elif args[0].lower() in ("ordenes", "orders"):
-        await _broker_orders(update)
     elif args[0].lower() in ("dividendos", "dividends"):
         await _broker_dividends(update)
-    elif args[0].lower() in ("transacciones", "transactions"):
-        await _broker_transactions(update)
     elif args[0].lower() == "cash":
         await _broker_cash(update)
     else:
@@ -79,18 +77,16 @@ async def cmd_broker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "/broker sync — Sincronizar posiciones\n"
             "/broker import — Importar posiciones\n"
             "/broker buscar TICKER — Buscar instrumento\n"
-            "/broker historial — Historial de órdenes\n"
             "/broker ordenes — Órdenes pendientes\n"
             "/broker cancelar ID — Cancelar orden\n"
             "/broker dividendos — Historial dividendos\n"
-            "/broker transacciones — Historial transacciones\n"
             "/broker cash — Detalle de cash",
         )
 
 
 async def _broker_status(update: Update) -> None:
     """Muestra el estado completo del broker."""
-    await update.message.reply_text("⏳ Consultando Trading212...")
+    await update.message.reply_text("⏳ Consultando eToro...")
 
     from broker.bridge import get_broker_status
     status = await get_broker_status()
@@ -102,15 +98,15 @@ async def _broker_status(update: Update) -> None:
         )
         return
 
-    mode_emoji = "🟢" if status["mode"] == "live" else "🔵"
+    mode_emoji = "🟢" if status["mode"] == "real" else "🔵"
     auto_emoji = "✅" if status["auto_execute"] else "❌"
-    req_emoji = "✅" if status.get("require_execution", TRADING212_REQUIRE_EXECUTION) else "❌"
+    req_emoji = "✅" if status.get("require_execution", ETORO_REQUIRE_EXECUTION) else "❌"
 
     lines = [
-        f"🏦 *Trading212 — {status['mode'].upper()}*",
+        f"🏦 *eToro — {status['mode'].upper()}*",
         f"{mode_emoji} Modo: {status['mode'].upper()}",
         f"{auto_emoji} Auto-ejecutar: {'Sí' if status['auto_execute'] else 'No'}",
-        f"{req_emoji} Ejecución obligatoria: {'Sí' if status.get('require_execution', TRADING212_REQUIRE_EXECUTION) else 'No'}",
+        f"{req_emoji} Ejecución obligatoria: {'Sí' if status.get('require_execution', ETORO_REQUIRE_EXECUTION) else 'No'}",
         "",
     ]
 
@@ -119,10 +115,10 @@ async def _broker_status(update: Update) -> None:
         acc = status["account"]
         lines.extend([
             "💰 *Cuenta*",
-            f"  Cash disponible: {acc['cash']:,.2f} {acc.get('currency', 'EUR')}",
-            f"  Invertido: {acc['invested']:,.2f} {acc.get('currency', 'EUR')}",
-            f"  Valor total: {acc['portfolio_value']:,.2f} {acc.get('currency', 'EUR')}",
-            f"  PnL: {acc['pnl']:+,.2f} ({acc.get('pnl_pct', 0):+.2f}%)",
+            f"  Cash disponible: {acc['cash']:,.2f} {acc.get('currency', 'USD')}",
+            f"  Invertido: {acc['invested']:,.2f} {acc.get('currency', 'USD')}",
+            f"  Valor total: {acc['portfolio_value']:,.2f} {acc.get('currency', 'USD')}",
+            f"  PnL: {acc['pnl']:+,.2f}",
             "",
         ])
     elif "account_error" in status:
@@ -181,7 +177,7 @@ async def _broker_sync(update: Update) -> None:
         return
 
     lines = [
-        f"🔄 *Sincronización Trading212 ({result['mode'].upper()})*\n",
+        f"🔄 *Sincronización eToro ({result['mode'].upper()})*\n",
         result["summary"],
         "",
     ]
@@ -190,7 +186,7 @@ async def _broker_sync(update: Update) -> None:
         lines.append("*🔵 Solo en broker (no en TradAI):*")
         for p in result["only_broker"]:
             lines.append(
-                f"  • {p['ticker']} ({p.get('name', '')}): "
+                f"  • {p['ticker']}: "
                 f"{p['shares']:.2f} acc @ {p['avg_price']:.2f}"
             )
         lines.append("  _Usa /broker import para importarlas_\n")
@@ -207,7 +203,7 @@ async def _broker_sync(update: Update) -> None:
         lines.append("*⚠️ Discrepancias:*")
         for p in result["mismatched"]:
             lines.append(
-                f"  • {p['ticker']} ({p.get('name', '')}): "
+                f"  • {p['ticker']}: "
                 f"broker={p['broker_shares']:.2f} / local={p['local_shares']:.2f}"
             )
 
@@ -247,16 +243,16 @@ async def _broker_import(update: Update) -> None:
 
 
 async def _broker_search(update: Update, query: str) -> None:
-    """Busca un instrumento en Trading212."""
+    """Busca un instrumento en eToro."""
     if not query:
         await update.message.reply_text(
             "Uso: /broker buscar TICKER\nEjemplo: /broker buscar AAPL",
         )
         return
 
-    from broker.trading212 import get_trading212_client
+    from broker.etoro import get_etoro_client
 
-    client = get_trading212_client()
+    client = get_etoro_client()
     if client is None:
         await update.message.reply_text("❌ Broker no inicializado")
         return
@@ -269,99 +265,16 @@ async def _broker_search(update: Update, query: str) -> None:
         return
 
     if not result.data:
-        await update.message.reply_text(f"No se encontró '{query}' en Trading212")
+        await update.message.reply_text(f"No se encontró '{query}' en eToro")
         return
 
     lines = [f"🔍 *Resultados para '{query}'* ({len(result.data)})\n"]
     for inst in result.data[:10]:
+        tradable = "✅" if inst.get("tradable") else "❌"
         lines.append(
-            f"  • *{inst['ticker']}* → `{inst['ticker_t212']}`\n"
-            f"    {inst['name']} | {inst['currency']} | {inst['type']}\n"
-            f"    ISIN: {inst.get('isin', 'N/A')} | "
-            f"Min qty: {inst.get('min_trade_qty', 'N/A')}"
-        )
-
-    await _send_long(update, "\n".join(lines))
-
-
-async def _broker_history(update: Update) -> None:
-    """Muestra historial de órdenes ejecutadas."""
-    from broker.trading212 import get_trading212_client
-
-    client = get_trading212_client()
-    if client is None:
-        await update.message.reply_text("❌ Broker no inicializado")
-        return
-
-    await update.message.reply_text("📜 Obteniendo historial...")
-
-    result = await client.get_order_history(limit=15)
-    if not result.success:
-        await update.message.reply_text(f"❌ Error: {result.error}")
-        return
-
-    data = result.data
-    items = data.get("items", data) if isinstance(data, dict) else data
-    if not items:
-        await update.message.reply_text("No hay órdenes en el historial")
-        return
-
-    lines = ["📜 *Historial de órdenes recientes*\n"]
-    for order in (items[:15] if isinstance(items, list) else []):
-        # /history/orders devuelve items con shape {"order": {...}, "fill": {...}}
-        # pero mantenemos compatibilidad con payload plano por robustez.
-        order_data = order.get("order", order) if isinstance(order, dict) else {}
-        fill_data = order.get("fill", {}) if isinstance(order, dict) else {}
-        if not isinstance(order_data, dict):
-            continue
-
-        instrument = order_data.get("instrument", {})
-        ticker_raw = order_data.get("ticker") or (
-            instrument.get("ticker", "?") if isinstance(instrument, dict) else "?"
-        )
-        ticker = client._clean_ticker(str(ticker_raw))
-
-        side_value = str(order_data.get("side", "BUY")).upper()
-        side = "🟢 BUY" if side_value == "BUY" else "🔴 SELL"
-
-        qty_raw = (
-            fill_data.get("quantity")
-            if isinstance(fill_data, dict) and fill_data.get("quantity") is not None
-            else order_data.get("filledQuantity", order_data.get("quantity", 0))
-        )
-        try:
-            qty = abs(float(qty_raw or 0))
-        except (TypeError, ValueError):
-            qty = 0.0
-
-        fill_price = (
-            fill_data.get("price") if isinstance(fill_data, dict) else None
-        )
-        try:
-            fill_price = float(fill_price) if fill_price is not None else None
-        except (TypeError, ValueError):
-            fill_price = None
-
-        value_raw = order_data.get("filledValue", order_data.get("value"))
-        try:
-            value = float(value_raw) if value_raw is not None else 0.0
-        except (TypeError, ValueError):
-            value = 0.0
-
-        if value == 0.0 and fill_price is not None and qty > 0:
-            value = fill_price * qty
-
-        status = order_data.get("status", "?")
-        date_value = (
-            fill_data.get("filledAt")
-            if isinstance(fill_data, dict) and fill_data.get("filledAt")
-            else order_data.get("createdAt", "")
-        )
-        date = str(date_value)[:10]
-
-        lines.append(
-            f"  {side} *{ticker}*: {qty:.2f} acc | "
-            f"{value:.2f}$ | {status} | {date}"
+            f"  • *{inst.get('symbol', '?')}* (ID: {inst.get('instrument_id', '?')})\n"
+            f"    {inst.get('name', 'N/A')} | {inst.get('type', 'N/A')}\n"
+            f"    Operable: {tradable}"
         )
 
     await _send_long(update, "\n".join(lines))
@@ -369,9 +282,9 @@ async def _broker_history(update: Update) -> None:
 
 async def _broker_orders(update: Update) -> None:
     """Muestra órdenes pendientes."""
-    from broker.trading212 import get_trading212_client
+    from broker.etoro import get_etoro_client
 
-    client = get_trading212_client()
+    client = get_etoro_client()
     if client is None:
         await update.message.reply_text("❌ Broker no inicializado")
         return
@@ -417,18 +330,21 @@ async def _broker_cancel(update: Update, order_id: str) -> None:
 
 
 async def _broker_dividends(update: Update) -> None:
-    """Muestra historial de dividendos cobrados en T212."""
+    """Muestra historial de dividendos."""
     from broker.bridge import get_broker_dividend_history
 
     await update.message.reply_text("💰 Obteniendo historial de dividendos...")
 
     divs = await get_broker_dividend_history(limit=30)
     if not divs:
-        await update.message.reply_text("No hay dividendos registrados en Trading212")
+        await update.message.reply_text(
+            "eToro no expone dividendos vía API.\n"
+            "Los dividendos se detectan mediante yfinance."
+        )
         return
 
     total = sum(d.get("amount", 0) for d in divs)
-    lines = [f"💰 *Dividendos Trading212* ({len(divs)} últimos)\n"]
+    lines = [f"💰 *Dividendos* ({len(divs)} últimos)\n"]
 
     for d in divs[:20]:
         ticker = d.get("ticker", "?")
@@ -446,39 +362,11 @@ async def _broker_dividends(update: Update) -> None:
     await _send_long(update, "\n".join(lines))
 
 
-async def _broker_transactions(update: Update) -> None:
-    """Muestra historial de transacciones T212."""
-    from broker.bridge import get_broker_transaction_history
-
-    await update.message.reply_text("📜 Obteniendo transacciones...")
-
-    txns = await get_broker_transaction_history(limit=30)
-    if not txns:
-        await update.message.reply_text("No hay transacciones recientes en Trading212")
-        return
-
-    lines = [f"📜 *Transacciones Trading212* ({len(txns)} últimas)\n"]
-
-    for t in txns[:20]:
-        tx_type = t.get("type", "?")
-        amount = t.get("amount", 0)
-        date = t.get("date", "")[:10]
-        emoji = "🟢" if amount > 0 else "🔴" if amount < 0 else "⚪"
-        lines.append(
-            f"  {emoji} {tx_type}: {amount:+,.2f} | {date}"
-        )
-
-    if len(txns) > 20:
-        lines.append(f"  _... y {len(txns) - 20} más_")
-
-    await _send_long(update, "\n".join(lines))
-
-
 async def _broker_cash(update: Update) -> None:
-    """Muestra detalle de cash del broker T212."""
-    from broker.trading212 import get_trading212_client
+    """Muestra detalle de cash del broker eToro."""
+    from broker.etoro import get_etoro_client
 
-    client = get_trading212_client()
+    client = get_etoro_client()
     if client is None:
         await update.message.reply_text("❌ Broker no inicializado")
         return
@@ -489,33 +377,12 @@ async def _broker_cash(update: Update) -> None:
         return
 
     acc = result.data
-    # Obtener datos raw para más detalle
-    raw_result = await client._request(
-        "GET", "/equity/account/summary", rate_key="account"
-    )
-    cash_detail = ""
-    if raw_result.success and raw_result.data:
-        cash_data = raw_result.data.get("cash", {})
-        investments = raw_result.data.get("investments", {})
-        cash_detail = (
-            f"\n📊 *Desglose cash:*\n"
-            f"  Disponible para operar: {cash_data.get('availableToTrade', 0):,.2f}\n"
-            f"  Reservado para órdenes: {cash_data.get('reservedForOrders', 0):,.2f}\n"
-            f"  En Pies: {cash_data.get('inPies', 0):,.2f}\n"
-            f"\n📈 *Inversiones:*\n"
-            f"  Coste total: {investments.get('totalCost', 0):,.2f}\n"
-            f"  Valor actual: {investments.get('currentValue', 0):,.2f}\n"
-            f"  PnL realizado: {investments.get('realizedProfitLoss', 0):+,.2f}\n"
-            f"  PnL no realizado: {investments.get('unrealizedProfitLoss', 0):+,.2f}\n"
-        )
-
     text = (
-        f"💰 *Trading212 Cash — {acc.mode.upper()}*\n\n"
+        f"💰 *eToro Cash — {acc.mode.upper()}*\n\n"
         f"💵 Cash total: {acc.cash:,.2f} {acc.currency}\n"
         f"📊 Invertido: {acc.invested:,.2f} {acc.currency}\n"
         f"💎 Valor total: {acc.portfolio_value:,.2f} {acc.currency}\n"
-        f"{'🟢' if acc.pnl >= 0 else '🔴'} PnL: {acc.pnl:+,.2f} ({acc.pnl_pct:+.2f}%)\n"
-        f"{cash_detail}"
+        f"{'🟢' if acc.pnl >= 0 else '🔴'} PnL: {acc.pnl:+,.2f}\n"
     )
     await _send_long(update, text)
 
@@ -523,5 +390,5 @@ async def _broker_cash(update: Update) -> None:
 # ── Registro de comandos ─────────────────────────────────────
 
 COMMANDS: list[CommandInfo] = [
-    CommandInfo("broker", cmd_broker, "Trading212: /broker [sync|import|buscar|historial]"),
+    CommandInfo("broker", cmd_broker, "eToro: /broker [sync|import|buscar|ordenes]"),
 ]

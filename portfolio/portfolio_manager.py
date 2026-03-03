@@ -7,7 +7,7 @@ El usuario indica qué operaciones ha realizado (ticker, acciones, precio)
 y el bot las registra, monitoriza y analiza.
 Incluye tracking de cash y aprendizaje automático al cerrar posiciones.
 
-Para carteras REAL conectadas a Trading212, usa precios del broker como
+Para carteras REAL conectadas a eToro, usa precios del broker como
 fuente primaria (más precisa y sin delay de 15 min vs yfinance).
 """
 
@@ -98,7 +98,7 @@ async def execute_buy(
     # ── Ejecutar primero en broker para cartera REAL ──
     broker_info = {}
     if portfolio.portfolio_type == PortfolioType.REAL and not skip_broker_execution:
-        from config.settings import TRADING212_REQUIRE_EXECUTION
+        from config.settings import ETORO_REQUIRE_EXECUTION
 
         try:
             from broker.bridge import broker_buy
@@ -120,19 +120,19 @@ async def execute_buy(
                     "broker_executed": False,
                     "broker_note": broker_result.error,
                 }
-                if TRADING212_REQUIRE_EXECUTION:
+                if ETORO_REQUIRE_EXECUTION:
                     return {
                         "success": False,
-                        "error": f"Trading212 rechazó la compra: {broker_result.error}",
+                        "error": f"eToro rechazó la compra: {broker_result.error}",
                         "risk_warnings": risk.warnings,
                         **broker_info,
                     }
         except Exception as e:
             broker_info = {"broker_executed": False, "broker_note": str(e)}
-            if TRADING212_REQUIRE_EXECUTION:
+            if ETORO_REQUIRE_EXECUTION:
                 return {
                     "success": False,
-                    "error": f"Error ejecutando compra en Trading212: {e}",
+                    "error": f"Error ejecutando compra en eToro: {e}",
                     "risk_warnings": risk.warnings,
                     **broker_info,
                 }
@@ -262,7 +262,7 @@ async def execute_limit_buy(
     Si el broker no está disponible, la orden queda registrada igualmente
     en la BD para seguimiento manual.
 
-    Expiración automática: 24h.  Si no se ejecuta, se cancela en T212 y
+    Expiración automática: 24h.  Si no se ejecuta, se cancela en eToro y
     se re-analiza el ticker para decidir si repetir la orden.
     """
     portfolio = await repo.get_portfolio(portfolio_id)
@@ -362,7 +362,7 @@ async def execute_sell(
     # ── Ejecutar primero en broker para cartera REAL ──
     broker_info = {}
     if portfolio.portfolio_type == PortfolioType.REAL:
-        from config.settings import TRADING212_REQUIRE_EXECUTION
+        from config.settings import ETORO_REQUIRE_EXECUTION
 
         try:
             from broker.bridge import broker_sell
@@ -386,18 +386,18 @@ async def execute_sell(
                     "broker_executed": False,
                     "broker_note": broker_result.error,
                 }
-                if TRADING212_REQUIRE_EXECUTION:
+                if ETORO_REQUIRE_EXECUTION:
                     return {
                         "success": False,
-                        "error": f"Trading212 rechazó la venta: {broker_result.error}",
+                        "error": f"eToro rechazó la venta: {broker_result.error}",
                         **broker_info,
                     }
         except Exception as e:
             broker_info = {"broker_executed": False, "broker_note": str(e)}
-            if TRADING212_REQUIRE_EXECUTION:
+            if ETORO_REQUIRE_EXECUTION:
                 return {
                     "success": False,
-                    "error": f"Error ejecutando venta en Trading212: {e}",
+                    "error": f"Error ejecutando venta en eToro: {e}",
                     **broker_info,
                 }
 
@@ -617,14 +617,14 @@ async def get_portfolio_summary(portfolio_id: int) -> dict[str, Any]:
     positions = list(await repo.get_open_positions(portfolio_id))
     acct_ccy = ACCOUNT_CURRENCY
 
-    # Para cartera REAL, refrescar precios T212 antes de usar get_prices_batch
+    # Para cartera REAL, refrescar precios eToro antes de usar get_prices_batch
     if portfolio.portfolio_type == PortfolioType.REAL:
         try:
             await refresh_broker_prices()
         except Exception as e:
-            logger.debug(f"Error refrescando precios T212: {e}")
+            logger.debug(f"Error refrescando precios eToro: {e}")
 
-    # Actualizar precios (T212 primero, yfinance como fallback)
+    # Actualizar precios (eToro primero, yfinance como fallback)
     tickers_by_market: dict[str, list[str]] = {}
     for pos in positions:
         tickers_by_market.setdefault(pos.market, []).append(pos.ticker)
@@ -775,12 +775,12 @@ async def get_portfolio_summary(portfolio_id: int) -> dict[str, Any]:
 
 async def update_all_prices(portfolio_id: int) -> int:
     """Actualiza los precios de todas las posiciones abiertas.
-    Para REAL, usa T212 primero (1 llamada) y yfinance como fallback."""
+    Para REAL, usa eToro primero (1 llamada) y yfinance como fallback."""
     portfolio = await repo.get_portfolio(portfolio_id)
     positions = list(await repo.get_open_positions(portfolio_id))
     updated = 0
 
-    # Refrescar precios T212 si es cartera REAL
+    # Refrescar precios eToro si es cartera REAL
     if portfolio and portfolio.portfolio_type == PortfolioType.REAL:
         try:
             await refresh_broker_prices()
@@ -808,7 +808,7 @@ async def check_alerts(portfolio_id: int) -> list[dict[str, Any]]:
     positions = list(await repo.get_open_positions(portfolio_id))
     alerts = []
 
-    # Refrescar T212 para precios más precisos en SL/TP
+    # Refrescar eToro para precios más precisos en SL/TP
     portfolio = await repo.get_portfolio(portfolio_id)
     if portfolio and portfolio.portfolio_type == PortfolioType.REAL:
         try:

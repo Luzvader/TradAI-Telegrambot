@@ -43,8 +43,8 @@ class BrokerAccount:
     portfolio_value: float
     pnl: float
     pnl_pct: float
-    currency: str = "EUR"
-    mode: str = "demo"  # "demo" o "live"
+    currency: str = "USD"
+    mode: str = "demo"  # "demo" o "real"
 
 
 @dataclass
@@ -105,8 +105,8 @@ class BaseBroker(ABC):
         self, ticker: str, amount: float, side: str
     ) -> BrokerResult:
         """
-        Orden por valor monetario – no soportada por todos los brokers.
-        Implementación por defecto devuelve error.
+        Orden por valor monetario (comprar por importe).
+        eToro soporta esto nativamente (by-amount).
         """
         return BrokerResult(
             success=False,
@@ -132,3 +132,12 @@ class BaseBroker(ABC):
     async def get_instrument_by_ticker(self, ticker: str) -> BrokerResult:
         """Obtiene info de un instrumento por ticker."""
         ...
+
+    async def close_position(
+        self, position_id: int | str, units_to_deduct: float | None = None
+    ) -> BrokerResult:
+        """Cierra una posición por su ID (para brokers como eToro)."""
+        return BrokerResult(
+            success=False,
+            error="close_position no implementado para este broker.",
+        )

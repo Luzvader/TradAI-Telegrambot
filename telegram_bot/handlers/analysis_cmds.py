@@ -128,12 +128,12 @@ async def cmd_analizar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if metrics_parts:
         text += " | ".join(metrics_parts) + "\n"
 
-    # Trading212 tradabilidad (una línea)
+    # eToro tradabilidad (una línea)
     tradability = analysis.get("broker_tradability") or {}
     if tradability.get("tradable") is True:
-        text += "🏦 T212: ✅ Operable\n"
+        text += "🏦 eToro: ✅ Operable\n"
     elif tradability.get("tradable") is False:
-        text += f"🏦 T212: ❌ {tradability.get('reason', 'No disponible')}\n"
+        text += f"🏦 eToro: ❌ {tradability.get('reason', 'No disponible')}\n"
 
     # Resumen técnico + valoración (compactos)
     if analysis.get("tech_summary"):
@@ -187,11 +187,11 @@ async def cmd_scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         tradability = opp.get("broker_tradability") or {}
         if tradability.get("tradable") is True:
-            text += "   Trading212: ✅ Operable\n"
+            text += "   eToro: ✅ Operable\n"
         elif tradability.get("tradable") is False:
-            text += "   Trading212: ❌ No operable\n"
+            text += "   eToro: ❌ No operable\n"
         elif "tradable" in tradability:
-            text += "   Trading212: ⚪ Sin verificar\n"
+            text += "   eToro: ⚪ Sin verificar\n"
         if opp.get("margin_of_safety") is not None:
             text += f"   MoS: {opp['margin_of_safety']:.1f}%\n"
 
@@ -381,7 +381,7 @@ async def cmd_comparar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def cmd_backtest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     /backtest TICKER1 TICKER2 ... [period=1y] [strategy=value]
-    Ejecuta un backtest sobre cartera demo (Trading212-oriented).
+    Ejecuta un backtest sobre cartera demo (eToro-oriented).
     Ejemplo: /backtest AAPL MSFT GOOG period=2y strategy=growth
     """
     # Parsear argumentos

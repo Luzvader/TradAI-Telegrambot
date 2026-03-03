@@ -71,17 +71,17 @@ async def main() -> None:
         f"Backtest: ID={portfolios['backtest'].id}"
     )
 
-    # 2b. Inicializar broker Trading212
-    from config.settings import TRADING212_MODE, get_trading212_credentials
-    t212_creds = get_trading212_credentials()
-    if t212_creds:
-        from broker.trading212 import init_trading212_from_credentials
+    # 2b. Inicializar broker eToro
+    from config.settings import ETORO_MODE, get_etoro_credentials
+    etoro_creds = get_etoro_credentials()
+    if etoro_creds:
+        from broker.etoro import init_etoro_from_credentials
         try:
-            clients = init_trading212_from_credentials(t212_creds, TRADING212_MODE)
+            clients = init_etoro_from_credentials(etoro_creds, ETORO_MODE)
             modes = ", ".join(m.upper() for m in clients)
-            logger.info(f"🏦 Trading212 broker inicializado ({modes})")
+            logger.info(f"🏦 eToro broker inicializado ({modes})")
 
-            # Sincronizar capital desde T212 (REAL←live, BACKTEST←demo)
+            # Sincronizar capital desde eToro (REAL←real, BACKTEST←demo)
             from broker.bridge import sync_all_capitals
             try:
                 cap_results = await sync_all_capitals()
@@ -96,11 +96,11 @@ async def main() -> None:
                     else:
                         logger.warning(f"   ⚠️ {mode.upper()}: {r.get('error')}")
             except Exception as e:
-                logger.warning(f"⚠️ Error sincronizando capital desde T212: {e}")
+                logger.warning(f"⚠️ Error sincronizando capital desde eToro: {e}")
         except Exception as e:
-            logger.warning(f"⚠️ Error inicializando Trading212: {e}")
+            logger.warning(f"⚠️ Error inicializando eToro: {e}")
     else:
-        logger.info("🏦 Trading212 no configurado (sin credenciales)")
+        logger.info("🏦 eToro no configurado (sin credenciales)")
 
     # 3. Crear bot de Telegram
     logger.info("🤖 Iniciando bot de Telegram...")
@@ -153,8 +153,8 @@ async def main() -> None:
             await app.updater.stop()
             await app.stop()
             # Cerrar broker
-            from broker.trading212 import shutdown_trading212
-            await shutdown_trading212()
+            from broker.etoro import shutdown_etoro
+            await shutdown_etoro()
             await close_db()
             logger.info("👋 TradAI detenido correctamente")
 

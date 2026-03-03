@@ -87,53 +87,53 @@ SIGNAL_SELL_THRESHOLD: float = _get_float("SIGNAL_SELL_THRESHOLD", 30.0)
 SCAN_MIN_SCORE: float = _get_float("SCAN_MIN_SCORE", 65.0)
 
 # ── Divisa de la cuenta ──────────────────────────────────────
-# Moneda base de la cuenta del broker (EUR para cuentas europeas T212).
+# Moneda base de la cuenta del broker (USD para cuentas eToro).
 # Los totales de cartera se muestran en esta divisa.
 # Se auto-detecta del broker si no se establece manualmente.
-ACCOUNT_CURRENCY: str = os.getenv("ACCOUNT_CURRENCY", "EUR")
+ACCOUNT_CURRENCY: str = os.getenv("ACCOUNT_CURRENCY", "USD")
 
-# ── Trading212 Broker ────────────────────────────────────────
-# Credenciales principales (aplican al modo por defecto TRADING212_MODE)
-TRADING212_API_KEY: str = os.getenv("TRADING212_API_KEY", "")
-TRADING212_API_SECRET: str = os.getenv("TRADING212_API_SECRET", "")
-TRADING212_MODE: str = os.getenv("TRADING212_MODE", "demo")  # "demo" o "live"
-# Credenciales separadas por modo (demo y live tienen cuentas diferentes en T212)
-TRADING212_DEMO_API_KEY: str = os.getenv("TRADING212_DEMO_API_KEY", "")
-TRADING212_DEMO_API_SECRET: str = os.getenv("TRADING212_DEMO_API_SECRET", "")
-TRADING212_LIVE_API_KEY: str = os.getenv("TRADING212_LIVE_API_KEY", "")
-TRADING212_LIVE_API_SECRET: str = os.getenv("TRADING212_LIVE_API_SECRET", "")
-TRADING212_AUTO_EXECUTE: bool = _get_bool("TRADING212_AUTO_EXECUTE", True)
-TRADING212_REQUIRE_EXECUTION: bool = _get_bool(
-    "TRADING212_REQUIRE_EXECUTION", True
+# ── eToro Broker ─────────────────────────────────────────────
+# Credenciales principales (aplican al modo por defecto ETORO_MODE)
+ETORO_API_KEY: str = os.getenv("ETORO_API_KEY", "")
+ETORO_USER_KEY: str = os.getenv("ETORO_USER_KEY", "")
+ETORO_MODE: str = os.getenv("ETORO_MODE", "demo")  # "demo" o "real"
+# Credenciales separadas por modo (demo y real pueden tener claves diferentes)
+ETORO_DEMO_API_KEY: str = os.getenv("ETORO_DEMO_API_KEY", "")
+ETORO_DEMO_USER_KEY: str = os.getenv("ETORO_DEMO_USER_KEY", "")
+ETORO_REAL_API_KEY: str = os.getenv("ETORO_REAL_API_KEY", "")
+ETORO_REAL_USER_KEY: str = os.getenv("ETORO_REAL_USER_KEY", "")
+ETORO_AUTO_EXECUTE: bool = _get_bool("ETORO_AUTO_EXECUTE", True)
+ETORO_REQUIRE_EXECUTION: bool = _get_bool(
+    "ETORO_REQUIRE_EXECUTION", True
 )
-TRADING212_ANALYSIS_ORIENTED: bool = _get_bool(
-    "TRADING212_ANALYSIS_ORIENTED", True
+ETORO_ANALYSIS_ORIENTED: bool = _get_bool(
+    "ETORO_ANALYSIS_ORIENTED", True
 )
 
 
-def get_trading212_credentials() -> dict[str, tuple[str, str]]:
+def get_etoro_credentials() -> dict[str, tuple[str, str]]:
     """
-    Devuelve las credenciales T212 disponibles por modo.
-    Retorno: {"demo": (key, secret), "live": (key, secret), ...}
+    Devuelve las credenciales eToro disponibles por modo.
+    Retorno: {"demo": (api_key, user_key), "real": (api_key, user_key), ...}
 
     Lógica de resolución:
-      1. TRADING212_DEMO_API_KEY / SECRET  →  modo demo
-      2. TRADING212_LIVE_API_KEY / SECRET  →  modo live
-      3. TRADING212_API_KEY / SECRET       →  modo TRADING212_MODE (fallback)
+      1. ETORO_DEMO_API_KEY / USER_KEY  →  modo demo
+      2. ETORO_REAL_API_KEY / USER_KEY  →  modo real
+      3. ETORO_API_KEY / USER_KEY       →  modo ETORO_MODE (fallback)
     """
     creds: dict[str, tuple[str, str]] = {}
 
     # Credenciales específicas por modo
-    if TRADING212_DEMO_API_KEY and TRADING212_DEMO_API_SECRET:
-        creds["demo"] = (TRADING212_DEMO_API_KEY, TRADING212_DEMO_API_SECRET)
-    if TRADING212_LIVE_API_KEY and TRADING212_LIVE_API_SECRET:
-        creds["live"] = (TRADING212_LIVE_API_KEY, TRADING212_LIVE_API_SECRET)
+    if ETORO_DEMO_API_KEY and ETORO_DEMO_USER_KEY:
+        creds["demo"] = (ETORO_DEMO_API_KEY, ETORO_DEMO_USER_KEY)
+    if ETORO_REAL_API_KEY and ETORO_REAL_USER_KEY:
+        creds["real"] = (ETORO_REAL_API_KEY, ETORO_REAL_USER_KEY)
 
     # Fallback: credenciales genéricas → modo por defecto
-    if TRADING212_API_KEY and TRADING212_API_SECRET:
-        mode = TRADING212_MODE.lower()
+    if ETORO_API_KEY and ETORO_USER_KEY:
+        mode = ETORO_MODE.lower()
         if mode not in creds:  # no pisar si ya hay específicas
-            creds[mode] = (TRADING212_API_KEY, TRADING212_API_SECRET)
+            creds[mode] = (ETORO_API_KEY, ETORO_USER_KEY)
 
     return creds
 
@@ -173,30 +173,30 @@ def validate_settings() -> list[str]:
         warnings.append(
             "OPENAI_API_KEY vacío: análisis IA desactivado (solo análisis cuantitativo)."
         )
-    if TRADING212_API_KEY and TRADING212_MODE not in ("demo", "live"):
+    if ETORO_API_KEY and ETORO_MODE not in ("demo", "real"):
         warnings.append(
-            f"TRADING212_MODE='{TRADING212_MODE}' inválido. Usa 'demo' o 'live'."
+            f"ETORO_MODE='{ETORO_MODE}' inválido. Usa 'demo' o 'real'."
         )
-    t212_creds = get_trading212_credentials()
-    if TRADING212_AUTO_EXECUTE and not t212_creds:
+    etoro_creds = get_etoro_credentials()
+    if ETORO_AUTO_EXECUTE and not etoro_creds:
         warnings.append(
-            "TRADING212_AUTO_EXECUTE activo pero no hay credenciales T212 configuradas."
+            "ETORO_AUTO_EXECUTE activo pero no hay credenciales eToro configuradas."
         )
-    if TRADING212_REQUIRE_EXECUTION and not TRADING212_AUTO_EXECUTE:
+    if ETORO_REQUIRE_EXECUTION and not ETORO_AUTO_EXECUTE:
         warnings.append(
-            "TRADING212_REQUIRE_EXECUTION activo pero TRADING212_AUTO_EXECUTE=false."
+            "ETORO_REQUIRE_EXECUTION activo pero ETORO_AUTO_EXECUTE=false."
         )
-    if TRADING212_API_KEY and not TRADING212_API_SECRET:
+    if ETORO_API_KEY and not ETORO_USER_KEY:
         warnings.append(
-            "TRADING212_API_KEY configurada pero falta TRADING212_API_SECRET."
+            "ETORO_API_KEY configurada pero falta ETORO_USER_KEY."
         )
-    if TRADING212_AUTO_EXECUTE and "live" in t212_creds:
+    if ETORO_AUTO_EXECUTE and "real" in etoro_creds:
         warnings.append(
-            "⚠️ TRADING212 LIVE configurado con auto-ejecución: operaciones con dinero REAL."
+            "⚠️ eToro REAL configurado con auto-ejecución: operaciones con dinero REAL."
         )
-    if len(t212_creds) == 2:
+    if len(etoro_creds) == 2:
         warnings.append(
-            "🏦 Trading212 dual mode: demo + live configurados."
+            "🏦 eToro dual mode: demo + real configurados."
         )
     if BACKTEST_INTERVAL_MINUTES < 5:
         warnings.append(
